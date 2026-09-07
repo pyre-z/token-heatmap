@@ -19,11 +19,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from .config import CELL, GAP, LEVELS, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, TZ
 
-# 主题族 -> {day: 配色, night: 配色}。colors[0] 为空数据格底色。
+# 主题族 -> {day: 配色, night: 配色}。colors[0] 为空数据格底色；background 供 bg=1 时使用。
 THEMES = {
     "github": {
-        "day": {"colors": ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"], "text": "#767676", "title": "#24292f", "legend": "#767676"},
-        "night": {"colors": ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"], "text": "#8b949e", "title": "#c9d1d9", "legend": "#7d8590"},
+        "day": {"colors": ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"], "text": "#767676", "title": "#24292f", "legend": "#767676", "background": "#ffffff"},
+        "night": {"colors": ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"], "text": "#8b949e", "title": "#c9d1d9", "legend": "#7d8590", "background": "#0d1117"},
     },
 }
 LEVEL_COLORS = THEMES["github"]["day"]["colors"]
@@ -58,7 +58,7 @@ def _mode(darkmode: str) -> str:
 
 
 def _palette(family: dict, mode: str) -> dict:
-    """返回供 body 直接引用的调色板 dict（colors/text/title/legend）。
+    """返回供 body 直接引用的调色板 dict（colors/text/title/legend/background）。
 
     - mode=day/night：值为具体 hex（fill 硬编码，兼容性最好）
     - mode=auto：值为 CSS 变量 var(--c0)...（由 <style> 提供默认 day + dark 覆盖 night）
@@ -69,24 +69,35 @@ def _palette(family: dict, mode: str) -> dict:
             "text": "var(--tx)",
             "title": "var(--tt)",
             "legend": "var(--lg)",
+            "background": "var(--bg)",
         }
     pal = family["day"] if mode == "day" else family["night"]
-    return {"colors": list(pal["colors"]), "text": pal["text"], "title": pal["title"], "legend": pal["legend"]}
+    return {"colors": list(pal["colors"]), "text": pal["text"], "title": pal["title"], "legend": pal["legend"], "background": pal["background"]}
 
 
-def _svg(width: int, height: int, family: dict, mode: str, body: str, scale: float = 1.0) -> str:
-    """组装 SVG。auto 模式注入双套 CSS 变量（默认 day，dark 系统切 night）。背景透明不画底。"""
+def _svg(width: int, height: int, family: dict, mode: str, body: str, scale: float = 1.0, bg: bool = False) -> str:
+    """组装 SVG。auto 模式注入双套 CSS 变量（默认 day，dark 系统切 night）。
+
+    bg=True 时画全幅背景 rect（用主题 background 色；auto 模式用 var(--bg)，随系统深浅切换），
+    bg=False（默认）背景透明不画底。
+    """
     w, h = width * scale, height * scale
     style = ""
+    rect = ""
     if mode == "auto":
         day, night = family["day"], family["night"]
-        d = "".join(f"--c{i}:{day['colors'][i]};" for i in range(5)) + f"--tx:{day['text']};--tt:{day['title']};--lg:{day['legend']}"
-        n = "".join(f"--c{i}:{night['colors'][i]};" for i in range(5)) + f"--tx:{night['text']};--tt:{night['title']};--lg:{night['legend']}"
+        d = "".join(f"--c{i}:{day['colors'][i]};" for i in range(5)) + f"--tx:{day['text']};--tt:{day['title']};--lg:{day['legend']};--bg:{day['background']}"
+        n = "".join(f"--c{i}:{night['colors'][i]};" for i in range(5)) + f"--tx:{night['text']};--tt:{night['title']};--lg:{night['legend']};--bg:{night['background']}"
         style = f"<style>:root{{{d}}}@media (prefers-color-scheme: dark){{:root{{{n}}}}}</style>"
-    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:g}" height="{h:g}" viewBox="0 0 {width} {height}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">{style}{body}</svg>'
+        if bg:
+            rect = '<rect width="100%" height="100%" fill="var(--bg)"/>'
+    elif bg:
+        pal = family["day"] if mode == "day" else family["night"]
+        rect = f'<rect width="100%" height="100%" fill="{pal["background"]}"/>'
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:g}" height="{h:g}" viewBox="0 0 {width} {height}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">{style}{rect}{body}</svg>'
 
 
-def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto") -> str:
+def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
     """生成年度热力图。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
     l = LANG.get(lang, LANG["zh"])
@@ -98,10 +109,10 @@ def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str
     months = ''.join(f'<text x="{PAD_LEFT + (((dt.date(year,m,1)-jan1).days+offset)//7)*(CELL+GAP)}" y="18" font-size="10" fill="{pal["text"]}">{l["months"][m-1]}</text>' for m in range(1, 13))
     weekdays = ''.join(f'<text x="14" y="{PAD_TOP+r*(CELL+GAP)+CELL//2+3}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{l["weekdays"][r]}</text>' for r in range(7))
     ly = height - 16; lx = width - PAD_RIGHT - LEVELS * 14 - 60; legend = ''.join(f'<rect x="{lx+i*14}" y="{ly-8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
-    return _svg(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}<text x="{lx-8}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{l["less"]}</text>{legend}<text x="{lx+LEVELS*14+6}" y="{ly}" font-size="9" fill="{pal["legend"]}">{l["more"]}</text><text x="{PAD_LEFT}" y="{height-2}" font-size="10" fill="{pal["title"]}">{year}</text>', scale)
+    return _svg(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}<text x="{lx-8}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{l["less"]}</text>{legend}<text x="{lx+LEVELS*14+6}" y="{ly}" font-size="9" fill="{pal["legend"]}">{l["more"]}</text><text x="{PAD_LEFT}" y="{height-2}" font-size="10" fill="{pal["title"]}">{year}</text>', scale, bg)
 
 
-def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto") -> str:
+def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
     """生成按周排列的月度热力图（横向 7 列 = 周一~周日，纵向按周堆叠）。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
     l = LANG.get(lang, LANG["zh"])
@@ -129,10 +140,10 @@ def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "
     legend = ''.join(f'<rect x="{legend_left + i * 14}" y="{ly - 8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
     less_x = legend_left - 6  # Less 文字右端（锚 end）
     title = f'{year}年{month}月' if lang == 'zh' else f'{l["months"][month - 1]} {year}'
-    return _svg(width, height, family, mode, f'<text x="{PAD_LEFT}" y="20" font-size="12" fill="{pal["title"]}">{title}</text>{labels}{"".join(cells)}<text x="{less_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{less_text}</text>{legend}<text x="{more_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{more_text}</text>', scale)
+    return _svg(width, height, family, mode, f'<text x="{PAD_LEFT}" y="20" font-size="12" fill="{pal["title"]}">{title}</text>{labels}{"".join(cells)}<text x="{less_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{less_text}</text>{legend}<text x="{more_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{more_text}</text>', scale, bg)
 
 
-def build_day_svg(year: int, month: int, day: int, hourly: dict[int, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto") -> str:
+def build_day_svg(year: int, month: int, day: int, hourly: dict[int, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
     """生成指定日期的 24 小时柱状图。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
     width, height = 530, 190
@@ -172,4 +183,4 @@ def build_day_svg(year: int, month: int, day: int, hourly: dict[int, int], theme
         grid.append(f'<text x="{left - 6}" y="{gy + 3:.2f}" font-size="8" fill="{pal["text"]}" text-anchor="end">{text}</text>')
     ticks = ''.join(f'<text x="{left + mark / 24 * chart_width:.2f}" y="{height - 14}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{mark}</text>' for mark in (0, 6, 12, 18, 24))
     grid = "".join(grid)
-    return _svg(width, height, family, mode, f'<text x="{left}" y="20" font-size="12" fill="{pal["title"]}">{year:04d}-{month:02d}-{day:02d}</text><line x1="{left}" y1="{top + chart_height}" x2="{width - right}" y2="{top + chart_height}" stroke="{pal["text"]}"/>{grid}{"".join(bars)}{ticks}', scale)
+    return _svg(width, height, family, mode, f'<text x="{left}" y="20" font-size="12" fill="{pal["title"]}">{year:04d}-{month:02d}-{day:02d}</text><line x1="{left}" y1="{top + chart_height}" x2="{width - right}" y2="{top + chart_height}" stroke="{pal["text"]}"/>{grid}{"".join(bars)}{ticks}', scale, bg)

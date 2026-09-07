@@ -100,3 +100,25 @@ def test_darkmode_auto_embeds_css_variables_and_media_query():
     assert "prefers-color-scheme: dark" in svg
     # body 颜色用 var() 引用
     assert 'fill="var(--c0)"' in svg
+
+
+def test_bg_0_default_transparent_no_background_rect():
+    svg = heatmap.build_svg(2026, {}, darkmode="0")  # 默认 bg=False
+    assert '<rect width="100%" height="100%"' not in svg
+    # auto 默认也应无背景 rect
+    svg_auto = heatmap.build_svg(2026, {}, darkmode="auto")
+    assert '<rect width="100%" height="100%"' not in svg_auto
+
+
+def test_bg_1_adds_theme_background_rect():
+    # day 模式：白底
+    svg = heatmap.build_svg(2026, {}, darkmode="0", bg=True)
+    assert '<rect width="100%" height="100%" fill="#ffffff"/>' in svg
+    # night 模式：黑底
+    svg2 = heatmap.build_svg(2026, {}, darkmode="1", bg=True)
+    assert '<rect width="100%" height="100%" fill="#0d1117"/>' in svg2
+    # auto 模式：var(--bg)
+    svg3 = heatmap.build_svg(2026, {}, darkmode="auto", bg=True)
+    assert '<rect width="100%" height="100%" fill="var(--bg)"/>' in svg3
+    assert "--bg:#ffffff" in svg3  # day 背景
+    assert "--bg:#0d1117" in svg3  # night 背景
