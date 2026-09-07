@@ -1,0 +1,41 @@
+# Token Heatmap — new-api 用量日历热力图 (SVG 直出)
+# 数据源: new-api PostgreSQL logs 表 type=2 成功请求按日聚合
+name: token-heatmap
+
+services:
+  token-heatmap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: token-heatmap:uv
+    container_name: token-heatmap
+    restart: unless-stopped
+    working_dir: /app
+    command: /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:3004:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app
+    networks:
+      - heatmap-net
+    # healthcheck: python:3.12-slim 无 curl，用 python urllib
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# 外部网络通过环境变量指定（兼容不同部署环境）：
+#   默认 proxy-network；1Panel 等环境在 .env 设 NETWORK_NAME=1panel-network
+networks:
+  heatmap-net:
+    name: ${NETWORK_NAME:-proxy-network}
+    external: true
