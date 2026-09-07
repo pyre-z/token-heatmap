@@ -108,6 +108,54 @@ def _fmt_count(n: int) -> str:
     return str(n)
 
 
+def _stats_info(daily: dict[str, int], today: dt.date, year: int) -> tuple[int, int, int]:
+    """从 daily 计算 今日/本月/今年 累计。
+
+    统计口径年为 year：build_svg 传图年份（历史年图显示该年整年累计），
+    build_auto_svg 传 today.year（滚动窗口含去年尾部，按前缀过滤只算今年）。
+    month/today 仅当 year == today.year 才非 0（历史年图无"今日/本月"语义）。
+    返回 (today_total, month_total, year_total)。
+    """
+    y_prefix = f"{year}-"
+    year_total = 0
+    if year == today.year:
+        today_total = daily.get(today.isoformat(), 0)
+        ym_prefix = f"{today.year}-{today.month:02d}-"
+        month_total = 0
+        today_key = today.isoformat()
+        for k, v in daily.items():
+            if k > today_key:
+                continue
+            if k.startswith(ym_prefix):
+                month_total += v
+            if k.startswith(y_prefix):
+                year_total += v
+        return today_total, month_total, year_total
+    # 历史年份图：整年累计（daily 为该年全年数据）
+    for k, v in daily.items():
+        if k.startswith(y_prefix):
+            year_total += v
+    return 0, 0, year_total
+
+
+def _weekday_labels(lang: str, pal: dict) -> str:
+    """GitHub 风格：左侧只标注 周一/周三/周五 三行（周日开头 r=0，Mon/Wed/Fri 在 r=1/3/5）。"""
+    if lang == "zh":
+        day_labels = {1: "一", 3: "三", 5: "五"}
+    else:
+        day_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
+    return "".join(
+        f'<text x="14" y="{PAD_TOP+r*(CELL+GAP)+CELL//2+3}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{label}</text>'
+        for r, label in day_labels.items()
+    )
+
+
+def _stats_text(today_total: int, month_total: int, year_total: int, lang: str) -> str:
+    if lang == "zh":
+        return f"今日 {_fmt_count(today_total)}　本月 {_fmt_count(month_total)}　今年 {_fmt_count(year_total)}"
+    return f"Today {_fmt_count(today_total)}  Month {_fmt_count(month_total)}  Year {_fmt_count(year_total)}"
+
+
 def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
     """生成年度热力图。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
@@ -121,28 +169,69 @@ def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str
         current = jan1 + dt.timedelta(days=index); col, row = divmod(index + offset, 7); key = current.isoformat(); value = daily.get(key, 0); fill = colors[levels.get(key, 0)] if value > 0 and current <= today else colors[0]
         cells.append(f'<rect x="{PAD_LEFT + col*(CELL+GAP)}" y="{PAD_TOP + row*(CELL+GAP)}" width="{CELL}" height="{CELL}" rx="2" fill="{fill}"><title>{key}: {value:,} tokens</title></rect>')
     months = ''.join(f'<text x="{PAD_LEFT + (((dt.date(year,m,1)-jan1).days+offset)//7)*(CELL+GAP)}" y="18" font-size="10" fill="{pal["text"]}">{l["months"][m-1]}</text>' for m in range(1, 13))
-    # GitHub 风格：左侧只标注 周一/周三/周五 三行（周日开头 r=0，Mon/Wed/Fri 在 r=1/3/5）
-    if lang == "zh":
-        day_labels = {1: "一", 3: "三", 5: "五"}
-    else:
-        day_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
-    weekdays = ''.join(f'<text x="14" y="{PAD_TOP+r*(CELL+GAP)+CELL//2+3}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{label}</text>' for r, label in day_labels.items())
+    weekdays = _weekday_labels(lang, pal)
     ly = height - stats_extra - 16; lx = width - PAD_RIGHT - LEVELS * 14 - 60; legend = ''.join(f'<rect x="{lx+i*14}" y="{ly-8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
-    # 底部统计行：今日/本月/今年（截至今天）；年份居左，统计整段右对齐
-    if today.year == year:
-        today_total = daily.get(today.isoformat(), 0)
-        month_total = sum(v for k, v in daily.items() if k.startswith(f"{year}-{today.month:02d}"))
-        year_total = sum(v for k, v in daily.items() if k < today.isoformat()) + today_total  # <= 今天
-    else:  # 非当前年份：统计整年为 total，今日/本月 0
-        today_total = month_total = 0
-        year_total = sum(daily.values())
-    if lang == "zh":
-        stats_text = f"今日 {_fmt_count(today_total)}　本月 {_fmt_count(month_total)}　今年 {_fmt_count(year_total)}"
-    else:
-        stats_text = f"Today {_fmt_count(today_total)}  Month {_fmt_count(month_total)}  Year {_fmt_count(year_total)}"
+    # 底部统计行：今日/本月/今年（截至今天）；年份居左，统计紧跟其后
+    today_total, month_total, year_total = _stats_info(daily, today, year)
+    stats_text = _stats_text(today_total, month_total, year_total, lang)
     stats_y = height - 16
     stats_x = PAD_LEFT + 56  # 年份（4 字符 ~28px）右侧留间距，统计左对齐
     return _svg(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}<text x="{lx-8}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{l["less"]}</text>{legend}<text x="{lx+LEVELS*14+6}" y="{ly}" font-size="9" fill="{pal["legend"]}">{l["more"]}</text><text x="{PAD_LEFT}" y="{stats_y}" font-size="10" fill="{pal["title"]}">{year}</text><text x="{stats_x}" y="{stats_y}" font-size="10" fill="{pal["text"]}">{stats_text}</text>', scale, bg)
+
+
+def build_auto_svg(daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
+    """生成滚动年热力图：从今日往前 365 天（GitHub 风格，今日在最后一列）。
+
+    daily 应为 [today-364, today] 区间（含两端）的按日 dict；
+    布局以 start 所在周的周日为第一列，today 所在周为最后一列（整周显示），
+    无标题；底部统计沿用 今日/本月/今年（自然年口径，_stats_info 前缀过滤天然正确）。
+    """
+    family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
+    l = LANG.get(lang, LANG["zh"])
+    today = shanghai_today()
+    start = today - dt.timedelta(days=364)  # 含今天共 365 天
+    # 第一列 = start 所在周的周日；最后一列 = today 所在周（到周六整周）
+    col_start = start - dt.timedelta(days=(start.weekday() + 1) % 7)
+    col_end_sat = today + dt.timedelta(days=(5 - today.weekday()) % 7)
+    cols = (col_end_sat - col_start).days // 7 + 1
+    width = PAD_LEFT + cols * (CELL + GAP) - GAP + PAD_RIGHT
+    stats_extra = 10
+    height = PAD_TOP + 7 * (CELL + GAP) - GAP + PAD_BOTTOM + stats_extra
+    levels = compute_levels(daily)
+    cells = []
+    # 逐列逐格：只画 <= today 的日期（GitHub 风格，未来日期不出现格子）
+    cursor = col_start
+    while cursor <= col_end_sat:
+        for row in range(7):
+            current = cursor + dt.timedelta(days=row)
+            if current > today:
+                continue  # 未来不画
+            key = current.isoformat()
+            value = daily.get(key, 0)
+            fill = colors[levels.get(key, 0)] if value > 0 else colors[0]
+            x = PAD_LEFT + ((cursor - col_start).days // 7) * (CELL + GAP)
+            y = PAD_TOP + row * (CELL + GAP)
+            cells.append(f'<rect x="{x}" y="{y}" width="{CELL}" height="{CELL}" rx="2" fill="{fill}"><title>{key}: {value:,} tokens</title></rect>')
+        cursor += dt.timedelta(days=7)
+    # 月份标签：GitHub 风格——列首(周日)进入新月份时标注该月（首列含 9/7 会正确标 9月）
+    month_texts = []
+    cursor = col_start
+    cidx = 0
+    last_label_month = None
+    while cursor <= col_end_sat:
+        m = cursor.month
+        if m != last_label_month:
+            x = PAD_LEFT + cidx * (CELL + GAP)
+            month_texts.append(f'<text x="{x}" y="18" font-size="10" fill="{pal["text"]}">{l["months"][m-1]}</text>')
+            last_label_month = m
+        cursor += dt.timedelta(days=7)
+        cidx += 1
+    weekdays = _weekday_labels(lang, pal)
+    ly = height - stats_extra - 16; lx = width - PAD_RIGHT - LEVELS * 14 - 60; legend = ''.join(f'<rect x="{lx+i*14}" y="{ly-8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
+    today_total, month_total, year_total = _stats_info(daily, today, today.year)
+    stats_text = _stats_text(today_total, month_total, year_total, lang)
+    stats_y = height - 16
+    return _svg(width, height, family, mode, f'{"".join(month_texts)}{weekdays}{"".join(cells)}<text x="{lx-8}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{l["less"]}</text>{legend}<text x="{lx+LEVELS*14+6}" y="{ly}" font-size="9" fill="{pal["legend"]}">{l["more"]}</text><text x="{PAD_LEFT}" y="{stats_y}" font-size="10" fill="{pal["text"]}">{stats_text}</text>', scale, bg)
 
 
 def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:

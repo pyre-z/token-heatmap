@@ -134,6 +134,34 @@ def test_year_svg_weekday_labels_github_style(monkeypatch):
         assert f'>{label}</text>' in month
 
 
+def test_auto_svg_layout(monkeypatch):
+    """auto 滚动年：窗口约 365 天 + 对齐周日首列，最右列含今天。"""
+    monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
+    # 窗口 [2025-09-08, 2026-09-07] 中放几天数据
+    daily = {"2025-09-08": 100, "2026-09-07": 200, "2025-12-31": 50}
+    svg = heatmap.build_auto_svg(daily, darkmode="0")
+    # 今天应有着色（200 > 0）
+    assert "<title>2026-09-07: 200 tokens</title>" in svg
+    # 今天 (2026-09-07 周一) 是最后一列；窗口起点 2025-09-08+... 应含 2025-09-08
+    assert "<title>2025-09-08: 100 tokens</title>" in svg
+    # 底部统计：今日=200, 今年=200(只算2026), 今日非 0
+    assert "今日 200" in svg
+    # 窗口 ~53 周 371 格，但未来日期不画（today=9/7 周一 → 本周后 5 天不画）→ 366
+    title_count = svg.count("<title>")
+    assert title_count == 366, f"title_count={title_count}"
+    # 未来日期不应有格子（2026-09-08 之后）
+    assert "<title>2026-09-08" not in svg
+    assert "<title>2026-09-12" not in svg
+
+
+def test_auto_svg_english_and_stats(monkeypatch):
+    monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
+    daily = {"2026-09-07": 5_000_000_000}
+    svg = heatmap.build_auto_svg(daily, lang="en", darkmode="1")
+    assert "Today 5.00B" in svg
+    assert "Mon" in svg and "Wed" in svg and "Fri" in svg  # GitHub 风格标签
+
+
 def test_darkmode_0_uses_day_palette():
     svg = heatmap.build_svg(2026, {}, darkmode="0")
     assert "#ebedf0" in svg  # github day 空格子色

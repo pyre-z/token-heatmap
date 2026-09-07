@@ -92,6 +92,26 @@ def test_database_error_is_hidden(monkeypatch):
     cache.cache_clear()
 
 
+def test_auto_default_grain_uses_auto(monkeypatch):
+    """默认 grain=auto：请求不带 grain 走滚动年分支，调用 daily_tokens_in_range。"""
+    cache.cache_clear()
+    client, src = client_with_source(monkeypatch)
+    r = client.get("/token/@")
+    assert r.status_code == 200
+    assert src.daily_calls == 1
+    cache.cache_clear()
+
+
+def test_auto_ignores_date_params(monkeypatch):
+    """grain=auto 忽略 year/month/day，返回 200。"""
+    cache.cache_clear()
+    client, src = client_with_source(monkeypatch)
+    r = client.get("/token/@?grain=auto&year=1999&month=13&day=99")
+    assert r.status_code == 200
+    assert src.daily_calls == 1
+    cache.cache_clear()
+
+
 def test_svg_cache_second_hit_skips_db(monkeypatch):
     """首次请求渲染并写缓存；TTL 内再次请求直接命中缓存，不再调用 source。"""
     cache.cache_clear()
