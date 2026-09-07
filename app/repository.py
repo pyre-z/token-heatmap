@@ -58,9 +58,25 @@ def year_epoch_bounds(year: int) -> tuple[int, int]:
     return int(start.timestamp()), int(end.timestamp())
 
 
-def fetch_daily_tokens(year: int) -> dict[str, int]:
-    """返回成功请求按 Asia/Shanghai 自然日聚合的 token 总数。"""
-    start, end = year_epoch_bounds(year)
+def month_epoch_bounds(year: int, month: int) -> tuple[int, int]:
+    """返回 Asia/Shanghai 自然月的 epoch 秒半开区间。"""
+    start = dt.datetime(year, month, 1, tzinfo=TZ)
+    if month == 12:
+        end = dt.datetime(year + 1, 1, 1, tzinfo=TZ)
+    else:
+        end = dt.datetime(year, month + 1, 1, tzinfo=TZ)
+    return int(start.timestamp()), int(end.timestamp())
+
+
+def day_epoch_bounds(year: int, month: int, day: int) -> tuple[int, int]:
+    """返回 Asia/Shanghai 自然日的 epoch 秒半开区间。"""
+    start = dt.datetime(year, month, day, tzinfo=TZ)
+    end = start + dt.timedelta(days=1)
+    return int(start.timestamp()), int(end.timestamp())
+
+
+def fetch_daily_tokens_in_range(start_epoch: int, end_epoch: int) -> dict[str, int]:
+    """按给定 epoch 半开区间返回成功请求的每日 token 总数。"""
     day = func.to_char(
         func.timezone("Asia/Shanghai", func.to_timestamp(Log.created_at)),
         "YYYY-MM-DD",
@@ -70,10 +86,31 @@ def fetch_daily_tokens(year: int) -> dict[str, int]:
         select(day, total)
         .where(
             Log.type == 2,
-            Log.created_at >= start,
-            Log.created_at < end,
+            Log.created_at >= start_epoch,
+            Log.created_at < end_epoch,
         )
         .group_by(day)
     )
     with Session(get_engine()) as session:
         return {day: int(total) for day, total in session.exec(statement).all()}
+
+
+def fetch_daily_tokens(year: int) -> dict[str, int]:
+    """返回成功请求按 Asia/Shanghai 自然年聚合的 token 总数。"""
+    return fetch_daily_tokens_in_range(*year_epoch_bounds(year))
+
+
+def fetch_hourly_tokens(year: int, month: int, day: int) -> dict[int, int]:
+    """返回指定自然日按 Asia/Shanghai 小时聚合的 token 总数。"""
+    start, end = day_epoch_bounds(year, month, day)
+    hour = func.extract(
+        "hour", func.timezone("Asia/Shanghai", func.to_timestamp(Log.created_at))
+    ).label("hour")
+    total = func.sum(Log.prompt_tokens + Log.completion_tokens).label("total")
+    statement = (
+        select(hour, total)
+        .where(Log.type == 2, Log.created_at >= start, Log.created_at < end)
+        .group_by(hour)
+    )
+    with Session(get_engine()) as session:
+        return {int(hour): int(total) for hour, total in session.exec(statement).all()}

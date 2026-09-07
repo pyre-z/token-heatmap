@@ -1,9 +1,12 @@
-"""Application configuration and SVG layout constants."""
+"""应用配置与 SVG 布局常量。"""
 from __future__ import annotations
 
+import os
 import zoneinfo
 
 TZ = zoneinfo.ZoneInfo("Asia/Shanghai")
+# 服务端 SVG 缓存 TTL（秒），可用环境变量覆盖
+CACHE_TTL_SECONDS = float(os.environ.get("CACHE_TTL_SECONDS", "60"))
 CELL = 11
 GAP = 3
 PAD_TOP = 30

@@ -1,1 +1,1 @@
-"""Token heatmap application package."""
+"""Token 热力图应用包。"""
