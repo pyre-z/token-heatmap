@@ -39,38 +39,36 @@ def test_year_svg_has_bottom_stats_line(monkeypatch):
         "2026-12-31": 999,                   # 未来日期（不应计入 year_total? 实际计入——见口径）
     }
     svg = heatmap.build_svg(2026, daily, darkmode="0")
-    # 今日 = 452.2M
-    assert "今日 452.2M" in svg
-    # 本月 = 452.2M + 1M = 453.2M
-    assert "本月 453.2M" in svg
-    # 今年 = 452.2M + 1M + 5M + 999（所有 <2026-09-08 的键；12-31 未来不计因为 > today）
-    assert "今年 458.2M" in svg
-    # 年份在底部统计行（y 为 height-8，不再贴底）
-    assert 'font-size="10" fill="#24292f">2026</text>' in svg
+    # 粗体标签 + 数值（tspan 包裹标签，数字紧随其后；zh 用 亿/万）
+    assert 'font-weight="bold">今日</tspan> 4.52亿' in svg
+    assert 'font-weight="bold">本月</tspan> 4.53亿' in svg
+    assert 'font-weight="bold">今年</tspan> 4.58亿' in svg
+    # 年份在底部统计行
+    assert 'font-size="11" fill="#24292f">2026</text>' in svg
 
 
 def test_year_svg_stats_uses_b_units_for_large(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
-    daily = {"2026-09-07": 35_000_000_000}  # 今日 35B
+    daily = {"2026-09-07": 35_000_000_000}  # 今日 350亿
     svg = heatmap.build_svg(2026, daily, darkmode="0")
-    assert "今日 35.00B" in svg
+    assert 'font-weight="bold">今日</tspan> 350.00亿' in svg
 
 
 def test_year_svg_english_stats_labels(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
     daily = {"2026-09-07": 1_000}
     svg = heatmap.build_svg(2026, daily, lang="en", darkmode="0")
-    assert "Today 1.0K" in svg
-    assert "Month" in svg
-    assert "Year" in svg
+    assert 'font-weight="bold">Today</tspan> 1.0K' in svg
+    assert 'font-weight="bold">Month</tspan>' in svg
+    assert 'font-weight="bold">Year</tspan>' in svg
 
 
 def test_non_current_year_stats_show_year_total(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
     daily = {"2025-01-01": 100, "2025-12-31": 200}
     svg = heatmap.build_svg(2025, daily, darkmode="0")
-    assert "今日 0" in svg
-    assert "今年 300" in svg
+    assert 'font-weight="bold">今日</tspan> 0' in svg
+    assert 'font-weight="bold">今年</tspan> 300' in svg
 
 
 def test_svg_leap_year_and_future_is_uncolored(monkeypatch):
@@ -119,11 +117,11 @@ def test_theme_and_english_labels():
 
 
 def test_year_svg_weekday_labels_github_style(monkeypatch):
-    """GitHub 风格：年图左侧只显示 周一/周三/周五 三个标签（zh=一三五 / en=Mon Wed Fri）。"""
+    """GitHub 风格：年图左侧只显示 周一/周三/周五 三个标签（zh=周一三五 / en=Mon Wed Fri）。"""
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 12, 31))
     zh = heatmap.build_svg(2026, {}, darkmode="0")
-    # zh: 只含 一/三/五，不含 二/四/六/日 的独立 weekday 标签
-    for label in ("一", "三", "五"):
+    # zh: 只含 周一/周三/周五，不含 周二/周四/周六/周日 的独立 weekday 标签
+    for label in ("周一", "周三", "周五"):
         assert f'>{label}</text>' in zh
     en = heatmap.build_svg(2026, {}, lang="en", darkmode="0")
     for label in ("Mon", "Wed", "Fri"):
@@ -144,8 +142,8 @@ def test_auto_svg_layout(monkeypatch):
     assert "<title>2026-09-07: 200 tokens</title>" in svg
     # 今天 (2026-09-07 周一) 是最后一列；窗口起点 2025-09-08+... 应含 2025-09-08
     assert "<title>2025-09-08: 100 tokens</title>" in svg
-    # 底部统计：今日=200, 今年=200(只算2026), 今日非 0
-    assert "今日 200" in svg
+    # 底部统计：今日=200, 今年=200(只算2026)
+    assert 'font-weight="bold">今日</tspan> 200' in svg
     # 窗口 ~53 周 371 格，但未来日期不画（today=9/7 周一 → 本周后 5 天不画）→ 366
     title_count = svg.count("<title>")
     assert title_count == 366, f"title_count={title_count}"
@@ -158,7 +156,7 @@ def test_auto_svg_english_and_stats(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
     daily = {"2026-09-07": 5_000_000_000}
     svg = heatmap.build_auto_svg(daily, lang="en", darkmode="1")
-    assert "Today 5.00B" in svg
+    assert 'font-weight="bold">Today</tspan> 5.00B' in svg
     assert "Mon" in svg and "Wed" in svg and "Fri" in svg  # GitHub 风格标签
 
 
