@@ -27,7 +27,7 @@ THEMES = {
     },
 }
 LEVEL_COLORS = THEMES["github"]["day"]["colors"]
-LANG = {"zh": {"months": [f"{i}月" for i in range(1, 13)], "weekdays": list("一二三四五六日"), "less": "少", "more": "更多"}, "en": {"months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], "weekdays": ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], "less": "Less", "more": "More"}}
+LANG = {"zh": {"months": [f"{i}月" for i in range(1, 13)], "weekdays": list("日一二三四五六"), "less": "少", "more": "更多"}, "en": {"months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], "weekdays": ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"], "less": "Less", "more": "More"}}
 
 
 def compute_levels(daily: dict[str, int]) -> dict[str, int]:
@@ -97,34 +97,68 @@ def _svg(width: int, height: int, family: dict, mode: str, body: str, scale: flo
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:g}" height="{h:g}" viewBox="0 0 {width} {height}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">{style}{rect}{body}</svg>'
 
 
+def _fmt_count(n: int) -> str:
+    """把 token 数格式化为 K/M/B（1B=1000M）紧凑单位。"""
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.2f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
 def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
     """生成年度热力图。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
     l = LANG.get(lang, LANG["zh"])
-    jan1 = dt.date(year, 1, 1); offset = jan1.weekday(); days = 366 if calendar.isleap(year) else 365
-    cols = (offset + days + 6) // 7; width = PAD_LEFT + cols * (CELL + GAP) - GAP + PAD_RIGHT; height = PAD_TOP + 7 * (CELL + GAP) - GAP + PAD_BOTTOM; levels = compute_levels(daily); today = shanghai_today(); cells = []
+    jan1 = dt.date(year, 1, 1); offset = (jan1.weekday() + 1) % 7; days = 366 if calendar.isleap(year) else 365
+    cols = (offset + days + 6) // 7; width = PAD_LEFT + cols * (CELL + GAP) - GAP + PAD_RIGHT; levels = compute_levels(daily); today = shanghai_today(); cells = []
+    # 底部统计行高度（今日/本月/今年），图例下方再留一行
+    stats_extra = 10
+    height = PAD_TOP + 7 * (CELL + GAP) - GAP + PAD_BOTTOM + stats_extra
     for index in range(days):
         current = jan1 + dt.timedelta(days=index); col, row = divmod(index + offset, 7); key = current.isoformat(); value = daily.get(key, 0); fill = colors[levels.get(key, 0)] if value > 0 and current <= today else colors[0]
         cells.append(f'<rect x="{PAD_LEFT + col*(CELL+GAP)}" y="{PAD_TOP + row*(CELL+GAP)}" width="{CELL}" height="{CELL}" rx="2" fill="{fill}"><title>{key}: {value:,} tokens</title></rect>')
     months = ''.join(f'<text x="{PAD_LEFT + (((dt.date(year,m,1)-jan1).days+offset)//7)*(CELL+GAP)}" y="18" font-size="10" fill="{pal["text"]}">{l["months"][m-1]}</text>' for m in range(1, 13))
-    weekdays = ''.join(f'<text x="14" y="{PAD_TOP+r*(CELL+GAP)+CELL//2+3}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{l["weekdays"][r]}</text>' for r in range(7))
-    ly = height - 16; lx = width - PAD_RIGHT - LEVELS * 14 - 60; legend = ''.join(f'<rect x="{lx+i*14}" y="{ly-8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
-    return _svg(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}<text x="{lx-8}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{l["less"]}</text>{legend}<text x="{lx+LEVELS*14+6}" y="{ly}" font-size="9" fill="{pal["legend"]}">{l["more"]}</text><text x="{PAD_LEFT}" y="{height-2}" font-size="10" fill="{pal["title"]}">{year}</text>', scale, bg)
+    # GitHub 风格：左侧只标注 周一/周三/周五 三行（周日开头 r=0，Mon/Wed/Fri 在 r=1/3/5）
+    if lang == "zh":
+        day_labels = {1: "一", 3: "三", 5: "五"}
+    else:
+        day_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
+    weekdays = ''.join(f'<text x="14" y="{PAD_TOP+r*(CELL+GAP)+CELL//2+3}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{label}</text>' for r, label in day_labels.items())
+    ly = height - stats_extra - 16; lx = width - PAD_RIGHT - LEVELS * 14 - 60; legend = ''.join(f'<rect x="{lx+i*14}" y="{ly-8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
+    # 底部统计行：今日/本月/今年（截至今天）；年份居左，统计整段右对齐
+    if today.year == year:
+        today_total = daily.get(today.isoformat(), 0)
+        month_total = sum(v for k, v in daily.items() if k.startswith(f"{year}-{today.month:02d}"))
+        year_total = sum(v for k, v in daily.items() if k < today.isoformat()) + today_total  # <= 今天
+    else:  # 非当前年份：统计整年为 total，今日/本月 0
+        today_total = month_total = 0
+        year_total = sum(daily.values())
+    if lang == "zh":
+        stats_text = f"今日 {_fmt_count(today_total)}　本月 {_fmt_count(month_total)}　今年 {_fmt_count(year_total)}"
+    else:
+        stats_text = f"Today {_fmt_count(today_total)}  Month {_fmt_count(month_total)}  Year {_fmt_count(year_total)}"
+    stats_y = height - 16
+    stats_x = PAD_LEFT + 56  # 年份（4 字符 ~28px）右侧留间距，统计左对齐
+    return _svg(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}<text x="{lx-8}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{l["less"]}</text>{legend}<text x="{lx+LEVELS*14+6}" y="{ly}" font-size="9" fill="{pal["legend"]}">{l["more"]}</text><text x="{PAD_LEFT}" y="{stats_y}" font-size="10" fill="{pal["title"]}">{year}</text><text x="{stats_x}" y="{stats_y}" font-size="10" fill="{pal["text"]}">{stats_text}</text>', scale, bg)
 
 
 def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
-    """生成按周排列的月度热力图（横向 7 列 = 周一~周日，纵向按周堆叠）。"""
+    """生成按周排列的月度热力图（横向 7 列 = 周日~周六，纵向按周堆叠）。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
     l = LANG.get(lang, LANG["zh"])
     first = dt.date(year, month, 1); count = calendar.monthrange(year, month)[1]
-    rows = (first.weekday() + count + 6) // 7  # 当月占几周
+    first_offset = (first.weekday() + 1) % 7  # 周日开头：周日=0
+    rows = (first_offset + count + 6) // 7  # 当月占几周
     gy = 38; legend_h = 26
     width = PAD_LEFT + 7 * (CELL + GAP) - GAP + PAD_RIGHT
     height = gy + rows * (CELL + GAP) - GAP + legend_h
     levels = compute_levels(daily); today = shanghai_today(); cells = []
     for number in range(1, count + 1):
         current = dt.date(year, month, number)
-        row, col = divmod(first.weekday() + number - 1, 7)  # row=第几周, col=星期几(0=周一)
+        row, col = divmod(first_offset + number - 1, 7)  # row=第几周, col=星期几(0=周日)
         key = current.isoformat(); value = daily.get(key, 0)
         fill = colors[levels.get(key, 0)] if value > 0 and current <= today else colors[0]
         cells.append(f'<rect x="{PAD_LEFT + col * (CELL + GAP)}" y="{gy + row * (CELL + GAP)}" width="{CELL}" height="{CELL}" rx="2" fill="{fill}"><title>{key}: {value:,} tokens</title></rect>')
