@@ -93,16 +93,17 @@ def test_svg_cache_second_hit_skips_db(monkeypatch):
 
 
 def test_svg_cache_key_differs_by_params(monkeypatch):
-    """不同参数（theme/grain/日期）应各自独立缓存条目。"""
+    """不同参数（grain/darkmode/日期）应各自独立缓存条目。"""
     cache.cache_clear()
     monkeypatch.setattr(main, "fetch_daily_tokens", lambda _: {})
     monkeypatch.setattr(main, "fetch_daily_tokens_in_range", lambda *_: {})
     monkeypatch.setattr(main, "fetch_hourly_tokens", lambda *_: {})
     client = TestClient(main.app)
     client.get("/token/@?grain=year&year=2026")
-    client.get("/token/@?grain=year&year=2026&theme=github-dark")
+    client.get("/token/@?grain=year&year=2026&darkmode=1")
+    client.get("/token/@?grain=year&year=2026&darkmode=0")
     client.get("/token/@?grain=month&year=2026&month=9")
     client.get("/token/@?grain=day&year=2026&month=9&day=7")
     client.get("/token/@?grain=year&year=2026&scale=2")
-    assert cache.cache_size() == 5
+    assert cache.cache_size() == 6
     cache.cache_clear()

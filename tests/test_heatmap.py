@@ -26,13 +26,13 @@ def test_svg_empty_common_year_structure(monkeypatch):
     svg = heatmap.build_svg(2026, {})
     assert '<svg xmlns="http://www.w3.org/2000/svg" width="793" height="151"' in svg
     assert svg.count("<title>") == 365
-    # 每日格子、白色画布和五个图例色块。
-    assert svg.count("<rect ") == 365 + 1 + 5
+    # 每日格子 + 五个图例色块（背景透明，无全幅画布 rect）。
+    assert svg.count("<rect ") == 365 + 5
 
 
 def test_svg_leap_year_and_future_is_uncolored(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2024, 2, 28))
-    svg = heatmap.build_svg(2024, {"2024-02-28": 10, "2024-02-29": 999})
+    svg = heatmap.build_svg(2024, {"2024-02-28": 10, "2024-02-29": 999}, darkmode="0")
     assert svg.count("<title>") == 366
     assert re.search(r'<rect[^>]*fill="#9be9a8"><title>2024-02-28: 10 tokens</title>', svg)
     assert re.search(r'<rect[^>]*fill="#ebedf0"><title>2024-02-29: 999 tokens</title>', svg)
@@ -41,7 +41,7 @@ def test_svg_leap_year_and_future_is_uncolored(monkeypatch):
 def test_svg_has_all_color_levels_for_spread_values(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 12, 31))
     daily = {f"2026-01-{day:02d}": day for day in range(1, 21)}
-    svg = heatmap.build_svg(2026, daily)
+    svg = heatmap.build_svg(2026, daily, darkmode="0")
     for color in heatmap.LEVEL_COLORS:
         assert color in svg
 
@@ -64,9 +64,39 @@ def test_day_svg_has_24_hourly_bars():
 
 
 def test_theme_and_english_labels():
-    svg = heatmap.build_month_svg(2026, 9, {}, theme="github-dark", lang="en")
-    assert "#0d1117" in svg
+    svg = heatmap.build_month_svg(2026, 9, {}, theme="github", lang="en", darkmode="1")
+    # 背景透明：不应有全幅背景 rect；night 配色（硬编码 hex）在
+    assert '<rect width="100%" height="100%"' not in svg
+    assert "#161b22" in svg  # github night 空格子色
+    assert "#8b949e" in svg  # github night 文字色
     assert "Sep 2026" in svg
     assert "Mo" in svg and "Tu" in svg and "Su" in svg
     assert "Less" in svg
     assert "More" in svg
+
+
+def test_darkmode_0_uses_day_palette():
+    svg = heatmap.build_svg(2026, {}, darkmode="0")
+    assert "#ebedf0" in svg  # github day 空格子色
+    assert "#24292f" in svg  # github day 标题色
+    assert "<style>" not in svg
+
+
+def test_darkmode_1_uses_night_palette():
+    svg = heatmap.build_svg(2026, {}, darkmode="1")
+    assert "#161b22" in svg  # github night 空格子色
+    assert "#c9d1d9" in svg  # github night 标题色
+    assert "<style>" not in svg
+
+
+def test_darkmode_auto_embeds_css_variables_and_media_query():
+    svg = heatmap.build_svg(2026, {}, theme="github", darkmode="auto")
+    # 内嵌 <style>：默认 day 值，prefers-color-scheme: dark 覆盖为 night 值
+    assert "<style>" in svg
+    assert "--c0:#ebedf0" in svg  # day 空格子
+    assert "--c0:#161b22" in svg  # night 空格子
+    assert "--tx:#767676" in svg
+    assert "--tx:#8b949e" in svg
+    assert "prefers-color-scheme: dark" in svg
+    # body 颜色用 var() 引用
+    assert 'fill="var(--c0)"' in svg
