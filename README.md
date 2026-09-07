@@ -1,29 +1,34 @@
 <h1 align="center">Token Heatmap</h1>
+
 <p align="center">
     <img src="https://count.pyre-z.me/token/@?theme=github&lang=zh&grain=auto&scale=1.5&bg=1&darkmode=0" height="150" alt="Token Heatmap" />
+    <br>
+    <a href="https://github.com/pyre-z/token-heatmap"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-pyre--z%2Ftoken--heatmap-181717?logo=github&logoColor=white"></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg"></a>
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white">
 </p>
 
-基于 new-api `logs` 表统计的 **Token 用量日历热力图**（SVG 直出，GitHub 贡献图风格）。支持 年 / 月 / 日 三种粒度、多主题（按族收编 day/night 两套配色）、中英双语、深浅色自动切换与背景控制。
+基于 **AI API Gateway 日志**统计的 **Token 用量日历热力图**（SVG 直出，GitHub 贡献图风格）。支持滚动年 / 年 / 月 / 日四种粒度、主题族（day/night 配色）、中英双语、深浅色自动切换与背景控制。
 
 ## 在线地址
 
 部署后通过反代或端口映射访问（路径均相对于站点根）：
 
 - 配置页: `GET /token/`（可视化调整参数并生成嵌入代码）
-- 热力图: `GET /token/@?grain=year&theme=github&lang=zh&darkmode=auto&bg=0&scale=1`
+- 热力图: `GET /token/@?grain=auto&theme=github&lang=zh&darkmode=auto&bg=0&scale=1`
 
 ```html
-<img src="https://your-host/token/@?grain=year" alt="Token 用量热力图">
+<img src="https://your-host/token/@?grain=auto" alt="Token 用量热力图">
 ```
 
 ## 参数
 
 | 参数 | 取值 | 默认 | 说明 |
 |---|---|---|---|
-| `grain` | `year` / `month` / `day` | `year` | 时间粒度 |
-| `year` / `month` / `day` | 数字 | 当前日期 | 目标日期；缺省自动取当天。`grain=month` 需 `year+month`，`grain=day` 需完整日期 |
+| `grain` | `auto` / `year` / `month` / `day` | `auto` | 时间粒度：`auto`=滚动年（今日往前一年，GitHub 原版效果）、`year`=自然年、`month`=月、`day`=日（24 小时柱状） |
+| `year` / `month` / `day` | 数字 | 当前日期 | 目标日期；缺省自动取当天。`grain=month` 需 `year+month`，`grain=day` 需完整日期。`grain=auto` 忽略日期参数（区间由今天决定） |
 | `theme` | 主题族名（当前 `github`） | `github` | 主题族，见下方「主题配置」 |
-| `lang` | `zh` / `en` | `zh` | 界面语言（月份/星期/图例） |
+| `lang` | `zh` / `en` | `zh` | 界面语言（月份/星期/图例/统计标签）；zh 统计用 万/亿，en 用 K/M/B |
 | `darkmode` | `0` / `1` / `auto` | `auto` | `0`=白天配色、`1`=夜晚配色、`auto`=跟随访问者系统深浅自动切换（内嵌 CSS `prefers-color-scheme`） |
 | `bg` | `0` / `1` | `0` | `0`=透明背景、`1`=使用主题 background 色（随 darkmode 取 day/night 对应背景） |
 | `scale` | `0.1`–`10` | `1` | 缩放倍数（渲染尺寸乘 scale，viewBox 不变，矢量等比缩放） |
@@ -31,6 +36,7 @@
 示例：
 
 ```
+/token/@?grain=auto
 /token/@?grain=month&year=2026&month=9
 /token/@?grain=day&theme=github&lang=en&darkmode=1&bg=1
 /token/@?grain=year&scale=2
@@ -67,21 +73,33 @@ THEMES = {
 
 | 端点 | 说明 |
 |---|---|
-| `GET /token/@?...` | 年/月/日热力图 SVG（参数见上表），`image/svg+xml`，Cache-Control 600s，服务端另有 60s TTL 内存缓存（`CACHE_TTL_SECONDS` 可配） |
+| `GET /token/@?...` | 热力图 SVG（参数见上表），`image/svg+xml`，Cache-Control 600s，服务端另有 60s TTL 内存缓存（`CACHE_TTL_SECONDS` 可配） |
 | `GET /token/` | 参数可视化配置页 |
 | `GET /token/healthz` | 健康检查 `{"status":"ok"}` |
 
-## 数据口径
+## 多数据源（Source 架构）
 
-- 数据源: 直连 new-api 的 PostgreSQL（只读；根目录 `.env` 提供连接凭据，已 gitignore）
-- 统计: `logs` 表 `type=2`（成功请求）的 `prompt_tokens + completion_tokens`，按 **Asia/Shanghai 时区**聚合（年图按自然日，日图按小时）
+服务端通过 `SOURCE` 环境变量选择数据源（不改 URL），实现 `Source` 抽象接口即可扩展新网关：
+
+- `new-api`（默认）— 直连 new-api 的 PostgreSQL `logs` 表
+- `sub2api` — 直连 sub2api 的 PostgreSQL `usage_logs` 表（token 口径含缓存，官方口径）
+
+### 数据口径
+
+| 数据源 | 表 / 口径 | 环境变量（前缀 `PG*` 同款） |
+|---|---|---|
+| `new-api` | `logs` 表 `type=2`（成功请求）的 `prompt_tokens + completion_tokens` | `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` |
+| `sub2api` | `usage_logs` 表 `input + output + cache_creation + cache_read tokens`（无状态过滤） | `SUB2API_PGHOST/SUB2API_PGPORT/SUB2API_PGDATABASE/SUB2API_PGUSER/SUB2API_PGPASSWORD` |
+
+- 统计均按 **Asia/Shanghai 时区**聚合（年图按自然日，日图按小时）
 - 不含计费额度（quota）、不含失败请求
-- 色阶: 5 级绿（GitHub 绿），按 **分位数分桶**（rank-based；相同 token 值保持同档，对数映射会把高基数数据全挤进最深档）
+- 色阶: 5 级绿（GitHub 绿），按 **分位数分桶**（rank-based；相同 token 值保持同档）
+- 多源并存时部署多实例，各实例 `.env` 指定 `SOURCE`（+ 各自独立连接变量）
 
 ## 部署
 
 ```bash
-# 1. 复制模板并填写 new-api 的真实 PostgreSQL 凭据
+# 1. 复制模板并填写真实数据源连接凭据
 cp .env.template .env
 
 # 2. 构建并启动（镜像内依赖已预装，运行时不会安装依赖）
@@ -95,9 +113,11 @@ docker compose up -d --build
 
 ## 布局
 
-- 年图: 53 周列 × 7 行（周一~周日），未来日期浅灰占位
-- 月图: 按周排列的月历（横向 7 列 = 周一~周日，纵向按周堆叠）
-- 日图: 24 小时柱状图，Y 轴以 M（百万）为单位动态取整齐刻度，X 轴 0/6/12/18/24
+- 滚动年(`auto`): ~53 周 × 7 行，**周日开头**，未来日期不画格子；左侧只标注 周一/周三/周五；月份标签按列首月变化标注；底部一行统计（今日/本月/今年，标签粗体）
+- 年图(`year`): 自然年 53 周列 × 7 行（周日开头），未来日期浅灰占位
+- 月图(`month`): 按周排列的月历（横向 7 列 = 周日~周六，纵向按周堆叠）
+- 日图(`day`): 24 小时柱状图，Y 轴以 M（百万）为单位动态取整齐刻度，X 轴 0/6/12/18/24
+- 底部统计行: 今日/本月/今年（截至当天），zh 用 万/亿 中文单位，en 用 K/M/B；图例整组右对齐
 - 每个格子 `<title>` 内带精确日期与 token 数（浏览器直接打开 SVG 可见 hover）
 
 ## 目录结构
@@ -108,12 +128,16 @@ token-heatmap/
 │   ├── main.py          # FastAPI 路由和装配（参数校验、TTL 缓存、配置页）
 │   ├── cache.py         # 线程安全 TTL 缓存
 │   ├── config.py        # 时区、布局常量
-│   ├── repository.py    # 只读 PostgreSQL 查询（SQLModel）
-│   └── heatmap.py       # 分桶、THEMES 主题配置与 SVG 渲染
+│   ├── heatmap.py       # 分桶、THEMES 主题配置与 SVG 渲染
+│   └── sources/         # 多数据源（Source 抽象 + 各网关实现）
+│       ├── base.py      # Source ABC + 时区日期区间 helper
+│       ├── newapi.py    # new-api logs 表实现
+│       └── sub2api_db.py# sub2api usage_logs 表实现
 ├── tests/               # 不访问真实数据库的 pytest 回归测试
 ├── pyproject.toml       # uv 项目与依赖定义
 ├── uv.lock              # 锁定依赖
-├── .env.template        # PostgreSQL 凭据模板（复制为 .env 后填写）
+├── .env.template        # 连接凭据模板（复制为 .env 后填写）
+├── LICENSE              # GPL-3.0
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -131,3 +155,7 @@ uv lock
 
 - 改 `app/` 代码后容器需重启加载（uvicorn 无 auto-reload）：`docker compose restart token-heatmap`
 - `./app:/app` 保持挂载；依赖在镜像 `/opt/venv`，restart 不会再联网安装依赖
+
+## License
+
+[GPL-3.0](LICENSE) © pyre-z
