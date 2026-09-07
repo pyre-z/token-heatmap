@@ -1,4 +1,4 @@
-# Token Heatmap
+<h1 align="center">Token Heatmap</h1>
 
 基于 new-api `logs` 表统计的 **Token 用量日历热力图**（SVG 直出，GitHub 贡献图风格）。支持 年 / 月 / 日 三种粒度、多主题（按族收编 day/night 两套配色）、中英双语、深浅色自动切换与背景控制。
 
