@@ -18,6 +18,9 @@ services:
       - .env
     volumes:
       - ./app:/app
+      - ./themes:/themes
+    environment:
+      - THEMES_DIR=/themes
     networks:
       - heatmap-net
     # healthcheck: python:3.12-slim 无 curl，用 python urllib

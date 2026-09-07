@@ -1,0 +1,16 @@
+{
+  "day": {
+    "colors": ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
+    "text": "#767676",
+    "title": "#24292f",
+    "legend": "#767676",
+    "background": "#ffffff"
+  },
+  "night": {
+    "colors": ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"],
+    "text": "#8b949e",
+    "title": "#c9d1d9",
+    "legend": "#7d8590",
+    "background": "#0d1117"
+  }
+}

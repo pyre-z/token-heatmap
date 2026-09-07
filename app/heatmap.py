@@ -19,14 +19,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from .config import CELL, GAP, LEVELS, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, TZ
 
-# 主题族 -> {day: 配色, night: 配色}。colors[0] 为空数据格底色；background 供 bg=1 时使用。
-THEMES = {
-    "github": {
-        "day": {"colors": ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"], "text": "#767676", "title": "#24292f", "legend": "#767676", "background": "#ffffff"},
-        "night": {"colors": ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"], "text": "#8b949e", "title": "#c9d1d9", "legend": "#7d8590", "background": "#0d1117"},
-    },
-}
-LEVEL_COLORS = THEMES["github"]["day"]["colors"]
+# 主题族从 themes/*.json 加载（theme_loader 维护；内置 github 兜底 + watchdog 热更新）。
+# THEMES 引用的是 loader 的内部 dict 对象，_reload 会整体替换该引用——
+# 因此下面统一用 get_themes() 取最新，避免持有过期 dict。
+try:
+    from theme_loader import BUILTIN_THEMES, get_themes, load, reload, start_watch
+except ModuleNotFoundError:  # pragma: no cover
+    from .theme_loader import BUILTIN_THEMES, get_themes, load, reload, start_watch
+
+THEMES = BUILTIN_THEMES  # 兼容旧引用：仅启动初始值；渲染一律走 get_themes()
+LEVEL_COLORS = BUILTIN_THEMES["github"]["day"]["colors"]
 LANG = {"zh": {"months": [f"{i}月" for i in range(1, 13)], "weekdays": list("日一二三四五六"), "less": "少", "more": "更多"}, "en": {"months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], "weekdays": ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"], "less": "Less", "more": "More"}}
 
 
@@ -45,7 +47,8 @@ def shanghai_today() -> dt.date:
 
 def _family(theme: str) -> dict:
     """按族名取主题族；未知族回退 github。"""
-    return THEMES.get(theme, THEMES["github"])
+    themes = get_themes()
+    return themes.get(theme, themes["github"])
 
 
 def _mode(darkmode: str) -> str:

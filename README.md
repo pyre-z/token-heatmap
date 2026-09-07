@@ -44,30 +44,35 @@
 
 ## 主题配置
 
-主题在 `app/heatmap.py` 的 `THEMES` 中**按「族」收编**：每个主题族包含 `day`（白天）与 `night`（夜晚）两套配色，由 `darkmode` 参数选择；`darkmode=auto` 时通过内嵌 CSS 变量（`:root` 默认 day，`@media (prefers-color-scheme: dark)` 覆盖为 night）让 SVG 跟随访问者系统深浅自动切换。
+主题以 **JSON 文件**形式放在项目根 `themes/` 文件夹（文件名 = 主题族名，如 `themes/github.json`），每个文件包含 `day`（白天）与 `night`（夜晚）两套配色，由 `darkmode` 参数选择；`darkmode=auto` 时通过内嵌 CSS 变量（`:root` 默认 day，`@media (prefers-color-scheme: dark)` 覆盖为 night）让 SVG 跟随访问者系统深浅自动切换。
 
-```python
-THEMES = {
-    "github": {
-        "day": {
-            "colors":     ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],  # 0空~4最高 五档色
-            "text":       "#767676",   # 月份/星期/刻度等次要文字
-            "title":      "#24292f",   # 标题文字
-            "legend":     "#767676",   # 图例「少/更多」文字
-            "background": "#ffffff",   # bg=1 时使用
-        },
-        "night": {
-            "colors":     ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"],
-            "text":       "#8b949e",
-            "title":      "#c9d1d9",
-            "legend":     "#7d8590",
-            "background": "#0d1117",
-        },
-    },
+```json
+// themes/github.json
+{
+  "day": {
+    "colors": ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
+    "text": "#767676",
+    "title": "#24292f",
+    "legend": "#767676",
+    "background": "#ffffff"
+  },
+  "night": {
+    "colors": ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"],
+    "text": "#8b949e",
+    "title": "#c9d1d9",
+    "legend": "#7d8590",
+    "background": "#0d1117"
+  }
 }
 ```
 
-新增主题时只需在 `THEMES` 加一个族并配齐 `day`/`night` 两套配色（`colors` 必须 5 档）；`theme` 参数即族名。旧版 `github-dark` 已随族收编移除，请改用 `theme=github&darkmode=1`。
+**热更新（watchdog）**：服务启动后用 watchdog 监听 `themes/` 目录，新增 / 修改 / 删除任意 `*.json` 都会自动重载主题表，**无需重启容器**。容器内主题目录 = 宿主 `themes/`（bind mount，`THEMES_DIR=/themes` 可覆盖），宿主编辑 JSON 即可实时生效。
+
+新增主题只需在 `themes/` 放一个 `名字.json`（族名即文件名，配齐 `day`/`night` 两套配色，`colors` 必须 5 档十六进制色），`theme` 参数即族名。删除文件即移除该主题。
+
+- 内置 `github` 兜底：`themes/` 目录不存在 / 为空 / 全部删除时仍可用 `theme=github`（内置配色与 `themes/github.json` 同构）；同名文件存在时以文件内容覆盖内置。
+- 非法 JSON / 结构不完整（缺 `day`/`night`、`colors` 不足 5 档等）自动跳过并告警，不影响其余主题。
+- 旧版 `github-dark` 已随族收编移除，请改用 `theme=github&darkmode=1`。
 
 ## 端点
 
@@ -125,16 +130,19 @@ docker compose up -d --build
 ```
 token-heatmap/
 ├── app/
-│   ├── main.py          # FastAPI 路由和装配（参数校验、TTL 缓存、配置页）
+│   ├── main.py          # FastAPI 路由和装配（参数校验、TTL 缓存、配置页、启动 watchdog）
 │   ├── cache.py         # 线程安全 TTL 缓存
 │   ├── config.py        # 时区、布局常量
-│   ├── heatmap.py       # 分桶、THEMES 主题配置与 SVG 渲染
+│   ├── heatmap.py       # 分桶、主题渲染（从 theme_loader 取主题）
+│   ├── theme_loader.py  # 主题加载器：themes/*.json + watchdog 热更新 + 内置 github 兜底
 │   └── sources/         # 多数据源（Source 抽象 + 各网关实现）
 │       ├── base.py      # Source ABC + 时区日期区间 helper
 │       ├── newapi.py    # new-api logs 表实现
 │       └── sub2api_db.py# sub2api usage_logs 表实现
+├── themes/              # 主题 JSON 文件（文件名 = 主题族名，watchdog 热更新）
+│   └── github.json
 ├── tests/               # 不访问真实数据库的 pytest 回归测试
-├── pyproject.toml       # uv 项目与依赖定义
+├── pyproject.toml       # uv 项目与依赖定义（含 watchdog）
 ├── uv.lock              # 锁定依赖
 ├── .env.template        # 连接凭据模板（复制为 .env 后填写）
 ├── LICENSE              # GPL-3.0
