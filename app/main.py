@@ -10,11 +10,11 @@ from fastapi.responses import HTMLResponse, Response
 try:
     from cache import cache_get, cache_set
     from heatmap import THEMES, build_day_svg, build_month_svg, build_svg, shanghai_today
-    from repository import fetch_daily_tokens, fetch_daily_tokens_in_range, fetch_hourly_tokens, month_epoch_bounds
+    from sources import get_source
 except ModuleNotFoundError:  # pragma: no cover
     from .cache import cache_get, cache_set
     from .heatmap import THEMES, build_day_svg, build_month_svg, build_svg, shanghai_today
-    from .repository import fetch_daily_tokens, fetch_daily_tokens_in_range, fetch_hourly_tokens, month_epoch_bounds
+    from .sources import get_source
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="Token Heatmap", docs_url=None, redoc_url=None)
@@ -59,7 +59,7 @@ def _render_svg(key: str, render: object) -> Response:
 
 @app.get("/token/@")
 def token_svg(grain: str = "year", year: str | None = Query(None), month: str | None = Query(None), day: str | None = Query(None), theme: str = "github", lang: str = "zh", darkmode: str = "auto", bg: str = "0", scale: str = "1") -> Response:
-    """根据 grain 粒度生成年度、月度或日度 SVG。scale 控制缩放（0.1-10）；darkmode=0/1/auto；bg=0 透明/1 主题背景色。"""
+    """根据 grain 粒度生成年度、月度或日度 SVG。scale 控制缩放（0.1-10）；darkmode=0/1/auto；bg=0 透明/1 主题背景色。数据源由 SOURCE env 决定。"""
     if darkmode not in {"0", "1", "auto"} or bg not in {"0", "1"}:
         _invalid()
     try:
@@ -71,13 +71,19 @@ def token_svg(grain: str = "year", year: str | None = Query(None), month: str | 
         _invalid()
     year, month, day = _validate(grain, year, month, day, theme)
     lang = lang if lang in {"zh", "en"} else "zh"
-    key = f"{grain}|{year}|{month}|{day}|{theme}|{lang}|{scale:g}|{darkmode}|{bg}"
+    source = get_source()
+    src_key = source.name
+    key = f"{src_key}|{grain}|{year}|{month}|{day}|{theme}|{lang}|{scale:g}|{darkmode}|{bg}"
     try:
         if grain == "year":
-            return _render_svg(key, lambda: build_svg(year, fetch_daily_tokens(year), theme, lang, scale, darkmode, bg == "1"))
+            start = dt.date(year, 1, 1); end = dt.date(year + 1, 1, 1)
+            return _render_svg(key, lambda: build_svg(year, source.daily_tokens_in_range(start, end), theme, lang, scale, darkmode, bg == "1"))
         if grain == "month":
-            return _render_svg(key, lambda: build_month_svg(year, month, fetch_daily_tokens_in_range(*month_epoch_bounds(year, month)), theme, lang, scale, darkmode, bg == "1"))
-        return _render_svg(key, lambda: build_day_svg(year, month, day, fetch_hourly_tokens(year, month, day), theme, lang, scale, darkmode, bg == "1"))
+            start = dt.date(year, month, 1)
+            end = dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)
+            return _render_svg(key, lambda: build_month_svg(year, month, source.daily_tokens_in_range(start, end), theme, lang, scale, darkmode, bg == "1"))
+        day_date = dt.date(year, month, day)
+        return _render_svg(key, lambda: build_day_svg(year, month, day, source.hourly_tokens(day_date), theme, lang, scale, darkmode, bg == "1"))
     except Exception:  # noqa: BLE001
         logger.exception("读取 token 热力图数据失败")
         raise HTTPException(status_code=502, detail="db error") from None
