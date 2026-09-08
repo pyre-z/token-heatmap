@@ -60,6 +60,8 @@ def test_newapi_daily_uses_epoch_index_window_and_type_filter(monkeypatch):
     assert "logs.created_at <" in where_sql
     assert "logs.type =" in where_sql
     assert "to_timestamp(logs.created_at)" not in where_sql
+    assert "coalesce(logs.prompt_tokens, %(coalesce_1)s)" in sql
+    assert "coalesce(logs.completion_tokens, %(coalesce_2)s)" in sql
 
 
 def test_newapi_daily_returns_day_string_keyed_dict(monkeypatch):
@@ -141,6 +143,9 @@ def test_sub2api_sql_uses_cache_tokens_and_tz(monkeypatch):
     sql = str(statements[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "usage_logs.created_at >=" in sql
     assert "usage_logs.created_at <" in sql
-    assert "input_tokens + usage_logs.output_tokens + usage_logs.cache_creation_tokens + usage_logs.cache_read_tokens" in sql
+    assert "coalesce(usage_logs.input_tokens, 0)" in sql
+    assert "coalesce(usage_logs.output_tokens, 0)" in sql
+    assert "coalesce(usage_logs.cache_creation_tokens, 0)" in sql
+    assert "coalesce(usage_logs.cache_read_tokens, 0)" in sql
     # 无 type 过滤（usage_logs 无成功标记语义）
     assert "usage_logs.type" not in sql

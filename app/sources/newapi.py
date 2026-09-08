@@ -12,11 +12,6 @@ from sqlalchemy import URL, BigInteger, Column, Engine, Text, func
 from sqlmodel import Field, SQLModel, Session, create_engine, select
 
 try:
-    from config import TZ
-except ModuleNotFoundError:  # pragma: no cover
-    from ..config import TZ
-
-try:
     from sources.base import Source, shanghai_date_range
 except ModuleNotFoundError:  # pragma: no cover
     from .base import Source, shanghai_date_range
@@ -72,7 +67,9 @@ class NewApiSource(Source):
             func.timezone("Asia/Shanghai", func.to_timestamp(Log.created_at)),
             "YYYY-MM-DD",
         ).label("day")
-        total = func.sum(Log.prompt_tokens + Log.completion_tokens).label("total")
+        total = func.sum(
+            func.coalesce(Log.prompt_tokens, 0) + func.coalesce(Log.completion_tokens, 0)
+        ).label("total")
         statement = (
             select(day, total)
             .where(
@@ -90,7 +87,9 @@ class NewApiSource(Source):
         hour = func.extract(
             "hour", func.timezone("Asia/Shanghai", func.to_timestamp(Log.created_at))
         ).label("hour")
-        total = func.sum(Log.prompt_tokens + Log.completion_tokens).label("total")
+        total = func.sum(
+            func.coalesce(Log.prompt_tokens, 0) + func.coalesce(Log.completion_tokens, 0)
+        ).label("total")
         statement = (
             select(hour, total)
             .where(Log.type == 2, Log.created_at >= start_epoch, Log.created_at < end_epoch)

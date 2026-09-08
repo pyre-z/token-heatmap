@@ -13,6 +13,7 @@ from __future__ import annotations
 import bisect
 import calendar
 import datetime as dt
+import math
 
 try:
     from config import CELL, GAP, LEVELS, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, TZ
@@ -20,14 +21,11 @@ except ModuleNotFoundError:  # pragma: no cover
     from .config import CELL, GAP, LEVELS, PAD_BOTTOM, PAD_LEFT, PAD_RIGHT, PAD_TOP, TZ
 
 # 主题族从 themes/*.json 加载（theme_loader 维护；内置 github 兜底 + watchdog 热更新）。
-# THEMES 引用的是 loader 的内部 dict 对象，_reload 会整体替换该引用——
-# 因此下面统一用 get_themes() 取最新，避免持有过期 dict。
 try:
-    from theme_loader import BUILTIN_THEMES, get_themes, load, reload, start_watch
+    from theme_loader import BUILTIN_THEMES, get_themes
 except ModuleNotFoundError:  # pragma: no cover
-    from .theme_loader import BUILTIN_THEMES, get_themes, load, reload, start_watch
+    from .theme_loader import BUILTIN_THEMES, get_themes
 
-THEMES = BUILTIN_THEMES  # 兼容旧引用：仅启动初始值；渲染一律走 get_themes()
 LEVEL_COLORS = BUILTIN_THEMES["github"]["day"]["colors"]
 LANG = {"zh": {"months": [f"{i}月" for i in range(1, 13)], "weekdays": list("日一二三四五六"), "less": "少", "more": "更多"}, "en": {"months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], "weekdays": ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"], "less": "Less", "more": "More"}}
 
@@ -320,7 +318,6 @@ def build_day_svg(year: int, month: int, day: int, hourly: dict[int, int], theme
     if max_m <= 0:
         y_max, nice_step, n_ticks = 1, 1, 0  # 全 0：只画 X 轴，无网格/刻度
     else:
-        import math
         raw_step = max_m / 6  # 期望 6 档间隔（含 0 共 7 个刻度）
         pow10 = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
         nice_step = min(n for n in (1 * pow10, 2 * pow10, 5 * pow10, 10 * pow10) if n >= raw_step)

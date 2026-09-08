@@ -78,6 +78,14 @@ def test_health_page_and_removed_paths():
         assert client.get(path).status_code == 404
 
 
+def test_large_html_and_svg_responses_are_gzipped(monkeypatch):
+    cache.cache_clear()
+    client, _ = client_with_source(monkeypatch)
+    assert client.get("/token/").headers["content-encoding"] == "gzip"
+    assert client.get("/token/@?grain=year&year=2026").headers["content-encoding"] == "gzip"
+    cache.cache_clear()
+
+
 def test_database_error_is_hidden(monkeypatch):
     cache.cache_clear()
 

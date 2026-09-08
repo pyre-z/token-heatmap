@@ -85,10 +85,10 @@ def _tz_range(start: dt.date, end: dt.date) -> tuple[dt.datetime, dt.datetime]:
 
 def _total_expr():
     return func.sum(
-        UsageLog.input_tokens
-        + UsageLog.output_tokens
-        + UsageLog.cache_creation_tokens
-        + UsageLog.cache_read_tokens
+        func.coalesce(UsageLog.input_tokens, 0)
+        + func.coalesce(UsageLog.output_tokens, 0)
+        + func.coalesce(UsageLog.cache_creation_tokens, 0)
+        + func.coalesce(UsageLog.cache_read_tokens, 0)
     ).label("total")
 
 
