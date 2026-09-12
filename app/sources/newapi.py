@@ -9,14 +9,22 @@ import datetime as dt
 import os
 
 from sqlalchemy import URL, BigInteger, Column, Engine, Text, func
-from sqlmodel import Field, SQLModel, Session, create_engine, select
+from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 try:
     from sources.base import Source, shanghai_date_range
 except ModuleNotFoundError:  # pragma: no cover
     from .base import Source, shanghai_date_range
 
-_PG_PREFIX = "PG"  # new-api 用 PG* 系列环境变量
+try:
+    from sources.pg import _build_connect_args, _parse_sslmode
+except ModuleNotFoundError:  # pragma: no cover
+    from .pg import _build_connect_args, _parse_sslmode
+
+try:
+    from config import DB_STATEMENT_TIMEOUT_MS
+except ModuleNotFoundError:  # pragma: no cover
+    from ..config import DB_STATEMENT_TIMEOUT_MS
 
 
 class Log(SQLModel, table=True):
@@ -46,12 +54,18 @@ def _get_engine() -> Engine:
             port=int(os.environ.get("PGPORT", "5432")),
             database=os.environ["PGDATABASE"],
         )
+        sslmode = _parse_sslmode(os.environ.get("PGSSLMODE"))
+        sslrootcert = os.environ.get("PGSSLROOTCERT") if sslmode else None
         _engine = create_engine(
             url,
             pool_pre_ping=True,
             pool_size=3,
             max_overflow=2,
-            connect_args={"connect_timeout": 5},
+            connect_args=_build_connect_args(
+                timeout_ms=DB_STATEMENT_TIMEOUT_MS,
+                sslmode=sslmode,
+                sslrootcert=sslrootcert,
+            ),
         )
     return _engine
 
@@ -60,6 +74,10 @@ class NewApiSource(Source):
     """new-api ``logs`` 表数据源。"""
 
     name = "new-api"
+
+    def is_configured(self) -> bool:
+        """返回 new-api 必需连接变量是否齐备（不建立连接）。"""
+        return all(os.environ.get(name) for name in ("PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD"))
 
     def daily_tokens_in_range(self, start: dt.date, end: dt.date) -> dict[str, int]:
         start_epoch, end_epoch = shanghai_date_range(start, end)

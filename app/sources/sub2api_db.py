@@ -12,8 +12,8 @@ from __future__ import annotations
 import datetime as dt
 import os
 
-from sqlalchemy import URL, BigInteger, Column, Engine, Integer, DateTime, func
-from sqlmodel import Field, SQLModel, Session, create_engine, select
+from sqlalchemy import URL, BigInteger, Column, DateTime, Engine, Integer, func
+from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 try:
     from config import TZ
@@ -25,13 +25,20 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from .base import Source
 
-_PG_ENV = {
-    "host": "SUB2API_PGHOST",
-    "port": "SUB2API_PGPORT",
-    "db": "SUB2API_PGDATABASE",
-    "user": "SUB2API_PGUSER",
-    "password": "SUB2API_PGPASSWORD",
-}
+try:
+    from sources.pg import _build_connect_args, _parse_sslmode
+except ModuleNotFoundError:  # pragma: no cover
+    from .pg import _build_connect_args, _parse_sslmode
+
+try:
+    from config import DB_STATEMENT_TIMEOUT_MS
+except ModuleNotFoundError:  # pragma: no cover
+    from ..config import DB_STATEMENT_TIMEOUT_MS
+
+
+
+# Required env vars for sub2api connection (port is optional with default 5432)
+_PG_REQUIRED_ENV = ["SUB2API_PGHOST", "SUB2API_PGDATABASE", "SUB2API_PGUSER", "SUB2API_PGPASSWORD"]
 
 
 class UsageLog(SQLModel, table=True):
@@ -55,24 +62,30 @@ def _get_engine() -> Engine:
     if _engine is None:
         url = URL.create(
             "postgresql+psycopg2",
-            username=os.environ[_PG_ENV["user"]],
-            password=os.environ[_PG_ENV["password"]],
-            host=os.environ[_PG_ENV["host"]],
-            port=int(os.environ.get(_PG_ENV["port"], "5432")),
-            database=os.environ[_PG_ENV["db"]],
+            username=os.environ["SUB2API_PGUSER"],
+            password=os.environ["SUB2API_PGPASSWORD"],
+            host=os.environ["SUB2API_PGHOST"],
+            port=int(os.environ.get("SUB2API_PGPORT", "5432")),
+            database=os.environ["SUB2API_PGDATABASE"],
         )
+        sslmode = _parse_sslmode(os.environ.get("SUB2API_PGSSLMODE"))
+        sslrootcert = os.environ.get("SUB2API_PGSSLROOTCERT") if sslmode else None
         _engine = create_engine(
             url,
             pool_pre_ping=True,
             pool_size=3,
             max_overflow=2,
-            connect_args={"connect_timeout": 5},
+            connect_args=_build_connect_args(
+                timeout_ms=DB_STATEMENT_TIMEOUT_MS,
+                sslmode=sslmode,
+                sslrootcert=sslrootcert,
+            ),
         )
     return _engine
 
 
 def _env_missing() -> bool:
-    return not all(os.environ.get(v) for v in _PG_ENV.values())
+    return not all(os.environ.get(v) for v in _PG_REQUIRED_ENV)
 
 
 def _tz_range(start: dt.date, end: dt.date) -> tuple[dt.datetime, dt.datetime]:
@@ -96,6 +109,10 @@ class Sub2ApiSource(Source):
     """sub2api ``usage_logs`` 表数据源（含缓存 token 口径）。"""
 
     name = "sub2api"
+
+    def is_configured(self) -> bool:
+        """返回 sub2api 必需连接变量是否齐备（不建立连接）。"""
+        return not _env_missing()
 
     def daily_tokens_in_range(self, start: dt.date, end: dt.date) -> dict[str, int]:
         if _env_missing():
