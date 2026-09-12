@@ -26,6 +26,13 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from .theme_loader import BUILTIN_THEMES, get_themes
 
+try:
+    from heatmap_stats import stats_info, stats_text
+    from heatmap_svg import legend_html, svg_document, weekday_labels
+except ModuleNotFoundError:  # pragma: no cover
+    from .heatmap_stats import stats_info, stats_text
+    from .heatmap_svg import legend_html, svg_document, weekday_labels
+
 LEVEL_COLORS = BUILTIN_THEMES["github"]["day"]["colors"]
 LANG = {"zh": {"months": [f"{i}月" for i in range(1, 13)], "weekdays": list("日一二三四五六"), "less": "少", "more": "更多"}, "en": {"months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], "weekdays": ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"], "less": "Less", "more": "More"}}
 
@@ -76,122 +83,6 @@ def _palette(family: dict, mode: str) -> dict:
     return {"colors": list(pal["colors"]), "text": pal["text"], "title": pal["title"], "legend": pal["legend"], "background": pal["background"]}
 
 
-def _svg(width: int, height: int, family: dict, mode: str, body: str, scale: float = 1.0, bg: bool = False) -> str:
-    """组装 SVG。auto 模式注入双套 CSS 变量（默认 day，dark 系统切 night）。
-
-    bg=True 时画全幅背景 rect（用主题 background 色；auto 模式用 var(--bg)，随系统深浅切换），
-    bg=False（默认）背景透明不画底。
-    """
-    w, h = width * scale, height * scale
-    style = ""
-    rect = ""
-    if mode == "auto":
-        day, night = family["day"], family["night"]
-        d = "".join(f"--c{i}:{day['colors'][i]};" for i in range(5)) + f"--tx:{day['text']};--tt:{day['title']};--lg:{day['legend']};--bg:{day['background']}"
-        n = "".join(f"--c{i}:{night['colors'][i]};" for i in range(5)) + f"--tx:{night['text']};--tt:{night['title']};--lg:{night['legend']};--bg:{night['background']}"
-        style = f"<style>:root{{{d}}}@media (prefers-color-scheme: dark){{:root{{{n}}}}}</style>"
-        if bg:
-            rect = '<rect width="100%" height="100%" fill="var(--bg)"/>'
-    elif bg:
-        pal = family["day"] if mode == "day" else family["night"]
-        rect = f'<rect width="100%" height="100%" fill="{pal["background"]}"/>'
-    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:g}" height="{h:g}" viewBox="0 0 {width} {height}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">{style}{rect}{body}</svg>'
-
-
-def _fmt_count(n: int) -> str:
-    """把 token 数格式化为 K/M/B（1B=1000M）紧凑单位。"""
-    if n >= 1_000_000_000:
-        return f"{n / 1_000_000_000:.2f}B"
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1_000:
-        return f"{n / 1_000:.1f}K"
-    return str(n)
-
-
-def _fmt_count_zh(n: int) -> str:
-    """中文单位：≥1 亿用 亿（2 位小数），≥1 万用 万（1 位小数），否则原数。"""
-    if n >= 100_000_000:
-        return f"{n / 100_000_000:.2f}亿"
-    if n >= 10_000:
-        return f"{n / 10_000:.1f}万"
-    return str(n)
-
-
-def _stats_info(daily: dict[str, int], today: dt.date, year: int) -> tuple[int, int, int]:
-    """从 daily 计算 今日/本月/今年 累计。
-
-    统计口径年为 year：build_svg 传图年份（历史年图显示该年整年累计），
-    build_auto_svg 传 today.year（滚动窗口含去年尾部，按前缀过滤只算今年）。
-    month/today 仅当 year == today.year 才非 0（历史年图无"今日/本月"语义）。
-    返回 (today_total, month_total, year_total)。
-    """
-    y_prefix = f"{year}-"
-    year_total = 0
-    if year == today.year:
-        today_total = daily.get(today.isoformat(), 0)
-        ym_prefix = f"{today.year}-{today.month:02d}-"
-        month_total = 0
-        today_key = today.isoformat()
-        for k, v in daily.items():
-            if k > today_key:
-                continue
-            if k.startswith(ym_prefix):
-                month_total += v
-            if k.startswith(y_prefix):
-                year_total += v
-        return today_total, month_total, year_total
-    # 历史年份图：整年累计（daily 为该年全年数据）
-    for k, v in daily.items():
-        if k.startswith(y_prefix):
-            year_total += v
-    return 0, 0, year_total
-
-
-def _weekday_labels(lang: str, pal: dict) -> str:
-    """GitHub 风格：左侧只标注 周一/周三/周五 三行（周日开头 r=0，Mon/Wed/Fri 在 r=1/3/5）。"""
-    if lang == "zh":
-        day_labels = {1: "周一", 3: "周三", 5: "周五"}
-    else:
-        day_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
-    return "".join(
-        f'<text x="16" y="{PAD_TOP+r*(CELL+GAP)+CELL//2+3}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{label}</text>'
-        for r, label in day_labels.items()
-    )
-
-
-def _stats_text(today_total: int, month_total: int, year_total: int, lang: str) -> str:
-    """统计行 HTML：标签粗体。zh 用 亿/万 中文单位，en 用 K/M/B。"""
-    if lang == "zh":
-        return (f'<tspan font-weight="bold">今日</tspan> {_fmt_count_zh(today_total)}　'
-                f'<tspan font-weight="bold">本月</tspan> {_fmt_count_zh(month_total)}　'
-                f'<tspan font-weight="bold">今年</tspan> {_fmt_count_zh(year_total)}')
-    return (f'<tspan font-weight="bold">Today</tspan> {_fmt_count(today_total)}  '
-            f'<tspan font-weight="bold">Month</tspan> {_fmt_count(month_total)}  '
-            f'<tspan font-weight="bold">Year</tspan> {_fmt_count(year_total)}')
-
-
-def _legend_html(width: int, ly: int, pal: dict, colors: list, lang_words: dict) -> str:
-    """图例 HTML：整组右对齐到画布右缘留 ~12px（GitHub 风格：Less □□□□□ More）。"""
-    more_text = lang_words["more"]
-    less_text = lang_words["less"]
-    right_edge = width - 12
-    more_x = right_edge  # More 文字右端
-    more_w = len(more_text) * 6.0 + 4  # 9px 字体：拉丁 ~5.5px/字符，CJK ~9px/字符，粗估偏宽
-    legend_right = more_x - more_w  # 色块区右端
-    legend_left = legend_right - LEVELS * 14  # 色块区左端
-    legend = "".join(
-        f'<rect x="{legend_left + i * 14}" y="{ly - 8}" width="10" height="10" rx="2" fill="{color}"/>'
-        for i, color in enumerate(colors)
-    )
-    less_x = legend_left - 6  # Less 文字右端（锚 end）
-    return (
-        f'<text x="{less_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{less_text}</text>'
-        f"{legend}"
-        f'<text x="{more_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{more_text}</text>'
-    )
-
-
 def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
     """生成年度热力图。"""
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
@@ -205,16 +96,16 @@ def build_svg(year: int, daily: dict[str, int], theme: str = "github", lang: str
         current = jan1 + dt.timedelta(days=index); col, row = divmod(index + offset, 7); key = current.isoformat(); value = daily.get(key, 0); fill = colors[levels.get(key, 0)] if value > 0 and current <= today else colors[0]
         cells.append(f'<rect x="{PAD_LEFT + col*(CELL+GAP)}" y="{PAD_TOP + row*(CELL+GAP)}" width="{CELL}" height="{CELL}" rx="2" fill="{fill}"><title>{key}: {value:,} tokens</title></rect>')
     months = ''.join(f'<text x="{PAD_LEFT + (((dt.date(year,m,1)-jan1).days+offset)//7)*(CELL+GAP)}" y="24" font-size="10" fill="{pal["text"]}">{l["months"][m-1]}</text>' for m in range(1, 13))
-    weekdays = _weekday_labels(lang, pal)
+    weekdays = weekday_labels(lang, pal)
     # 底部一行（GitHub 风格）：图例与统计同行，距最后一行格子留足 ~16px，底部留白 ~10px
     ly = height - 12  # 图例 baseline
-    legend_html = _legend_html(width, ly, pal, colors, l)
+    legend_markup = legend_html(width, ly, pal, colors, l)
     # 底部统计行：今日/本月/今年（截至今天）；年份居左，统计紧跟其后
-    today_total, month_total, year_total = _stats_info(daily, today, year)
-    stats_text = _stats_text(today_total, month_total, year_total, lang)
+    today_total, month_total, year_total = stats_info(daily, today, year)
+    stats_markup = stats_text(today_total, month_total, year_total, lang)
     stats_y = height - 12  # 与图例同 baseline（GitHub 底部一行）
     stats_x = PAD_LEFT + 56  # 年份（4 字符 ~28px）右侧留间距，统计左对齐
-    return _svg(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}{legend_html}<text x="{PAD_LEFT}" y="{stats_y}" font-size="11" fill="{pal["title"]}">{year}</text><text x="{stats_x}" y="{stats_y}" font-size="11" fill="{pal["text"]}">{stats_text}</text>', scale, bg)
+    return svg_document(width, height, family, mode, f'{months}{weekdays}{"".join(cells)}{legend_markup}<text x="{PAD_LEFT}" y="{stats_y}" font-size="11" fill="{pal["title"]}">{year}</text><text x="{stats_x}" y="{stats_y}" font-size="11" fill="{pal["text"]}">{stats_markup}</text>', scale, bg)
 
 
 def build_auto_svg(daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
@@ -222,7 +113,7 @@ def build_auto_svg(daily: dict[str, int], theme: str = "github", lang: str = "zh
 
     daily 应为 [today-364, today] 区间（含两端）的按日 dict；
     布局以 start 所在周的周日为第一列，today 所在周为最后一列（整周显示），
-    无标题；底部统计沿用 今日/本月/今年（自然年口径，_stats_info 前缀过滤天然正确）。
+    无标题；底部统计沿用 今日/本月/今年（自然年口径，stats_info 前缀过滤天然正确）。
     """
     family = _family(theme); mode = _mode(darkmode); pal = _palette(family, mode); colors = pal["colors"]
     l = LANG.get(lang, LANG["zh"])
@@ -264,14 +155,14 @@ def build_auto_svg(daily: dict[str, int], theme: str = "github", lang: str = "zh
             last_label_month = m
         cursor += dt.timedelta(days=7)
         cidx += 1
-    weekdays = _weekday_labels(lang, pal)
+    weekdays = weekday_labels(lang, pal)
     # 底部一行（GitHub 风格）：图例与统计同行，距格子 ~16px，底部留白 ~10px
     ly = height - 12  # 图例 baseline
-    legend_html = _legend_html(width, ly, pal, colors, l)
-    today_total, month_total, year_total = _stats_info(daily, today, today.year)
-    stats_text = _stats_text(today_total, month_total, year_total, lang)
+    legend_markup = legend_html(width, ly, pal, colors, l)
+    today_total, month_total, year_total = stats_info(daily, today, today.year)
+    stats_markup = stats_text(today_total, month_total, year_total, lang)
     stats_y = height - 12  # 与图例同 baseline（GitHub 底部一行）
-    return _svg(width, height, family, mode, f'{"".join(month_texts)}{weekdays}{"".join(cells)}{legend_html}<text x="{PAD_LEFT}" y="{stats_y}" font-size="11" fill="{pal["text"]}">{stats_text}</text>', scale, bg)
+    return svg_document(width, height, family, mode, f'{"".join(month_texts)}{weekdays}{"".join(cells)}{legend_markup}<text x="{PAD_LEFT}" y="{stats_y}" font-size="11" fill="{pal["text"]}">{stats_markup}</text>', scale, bg)
 
 
 def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
@@ -303,7 +194,7 @@ def build_month_svg(year: int, month: int, daily: dict[str, int], theme: str = "
     legend = ''.join(f'<rect x="{legend_left + i * 14}" y="{ly - 8}" width="10" height="10" rx="2" fill="{color}"/>' for i, color in enumerate(colors))
     less_x = legend_left - 6  # Less 文字右端（锚 end）
     title = f'{year}年{month}月' if lang == 'zh' else f'{l["months"][month - 1]} {year}'
-    return _svg(width, height, family, mode, f'<text x="{PAD_LEFT}" y="20" font-size="12" fill="{pal["title"]}">{title}</text>{labels}{"".join(cells)}<text x="{less_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{less_text}</text>{legend}<text x="{more_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{more_text}</text>', scale, bg)
+    return svg_document(width, height, family, mode, f'<text x="{PAD_LEFT}" y="20" font-size="12" fill="{pal["title"]}">{title}</text>{labels}{"".join(cells)}<text x="{less_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{less_text}</text>{legend}<text x="{more_x}" y="{ly}" font-size="9" fill="{pal["legend"]}" text-anchor="end">{more_text}</text>', scale, bg)
 
 
 def build_day_svg(year: int, month: int, day: int, hourly: dict[int, int], theme: str = "github", lang: str = "zh", scale: float = 1.0, darkmode: str = "auto", bg: bool = False) -> str:
@@ -345,4 +236,4 @@ def build_day_svg(year: int, month: int, day: int, hourly: dict[int, int], theme
         grid.append(f'<text x="{left - 6}" y="{gy + 3:.2f}" font-size="8" fill="{pal["text"]}" text-anchor="end">{text}</text>')
     ticks = ''.join(f'<text x="{left + mark / 24 * chart_width:.2f}" y="{height - 14}" font-size="9" fill="{pal["text"]}" text-anchor="middle">{mark}</text>' for mark in (0, 6, 12, 18, 24))
     grid = "".join(grid)
-    return _svg(width, height, family, mode, f'<text x="{left}" y="20" font-size="12" fill="{pal["title"]}">{year:04d}-{month:02d}-{day:02d}</text><line x1="{left}" y1="{top + chart_height}" x2="{width - right}" y2="{top + chart_height}" stroke="{pal["text"]}"/>{grid}{"".join(bars)}{ticks}', scale, bg)
+    return svg_document(width, height, family, mode, f'<text x="{left}" y="20" font-size="12" fill="{pal["title"]}">{year:04d}-{month:02d}-{day:02d}</text><line x1="{left}" y1="{top + chart_height}" x2="{width - right}" y2="{top + chart_height}" stroke="{pal["text"]}"/>{grid}{"".join(bars)}{ticks}', scale, bg)

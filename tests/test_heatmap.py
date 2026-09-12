@@ -58,9 +58,8 @@ def test_year_svg_english_stats_labels(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
     daily = {"2026-09-07": 1_000}
     svg = heatmap.build_svg(2026, daily, lang="en", darkmode="0")
-    assert 'font-weight="bold">Today</tspan> 1.0K' in svg
-    assert 'font-weight="bold">Month</tspan>' in svg
-    assert 'font-weight="bold">Year</tspan>' in svg
+    assert 'font-weight="bold">Today</tspan> 1.0K<tspan dx="12" font-weight="bold">Month</tspan>' in svg
+    assert '<tspan dx="12" font-weight="bold">Year</tspan>' in svg
 
 
 def test_non_current_year_stats_show_year_total(monkeypatch):
@@ -156,7 +155,8 @@ def test_auto_svg_english_and_stats(monkeypatch):
     monkeypatch.setattr(heatmap, "shanghai_today", lambda: dt.date(2026, 9, 7))
     daily = {"2026-09-07": 5_000_000_000}
     svg = heatmap.build_auto_svg(daily, lang="en", darkmode="1")
-    assert 'font-weight="bold">Today</tspan> 5.00B' in svg
+    assert 'font-weight="bold">Today</tspan> 5.00B<tspan dx="12" font-weight="bold">Month</tspan>' in svg
+    assert '<tspan dx="12" font-weight="bold">Year</tspan>' in svg
     assert "Mon" in svg and "Wed" in svg and "Fri" in svg  # GitHub 风格标签
 
 
