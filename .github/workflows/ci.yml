@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      - name: Ruff
+        run: uv run --frozen ruff check .
+
+      - name: Tests
+        run: uv run --frozen pytest -q
+
+      - name: Lockfile is up to date
+        run: uv lock --check
+
+      # 用模板占位生成 .env，仅用于 Compose 客户端校验（不含真实凭据）
+      - name: Compose config
+        run: |
+          cp .env.template .env
+          docker compose config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
