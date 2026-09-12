@@ -27,7 +27,7 @@
 |---|---|---|---|
 | `grain` | `auto` / `year` / `month` / `day` | `auto` | 时间粒度：`auto`=滚动年（今日往前一年，GitHub 原版效果）、`year`=自然年、`month`=月、`day`=日（24 小时柱状） |
 | `year` / `month` / `day` | 数字 | 当前日期 | 目标日期；缺省自动取当天。`grain=month` 需 `year+month`，`grain=day` 需完整日期。`grain=auto` 忽略日期参数（区间由今天决定） |
-| `theme` | 主题族名（当前 `github`） | `github` | 主题族，见下方「主题配置」 |
+| `theme` | 主题族名（内置 `github`，另有 `sakura`） | `github` | 主题族，见下方「主题配置」 |
 | `lang` | `zh` / `en` | `zh` | 界面语言（月份/星期/图例/统计标签）；zh 统计用 万/亿，en 用 K/M/B |
 | `darkmode` | `0` / `1` / `auto` | `auto` | `0`=白天配色、`1`=夜晚配色、`auto`=跟随访问者系统深浅自动切换（内嵌 CSS `prefers-color-scheme`） |
 | `bg` | `0` / `1` | `0` | `0`=透明背景、`1`=使用主题 background 色（随 darkmode 取 day/night 对应背景） |
@@ -168,7 +168,8 @@ token-heatmap/
 │       ├── newapi.py    # new-api logs 表实现
 │       └── sub2api_db.py# sub2api usage_logs 表实现
 ├── themes/              # 主题 JSON 文件（文件名 = 主题族名，watchdog 热更新）
-│   └── github.json
+│   ├── github.json      # GitHub 绿
+│   └── sakura.json      # 樱花粉
 ├── tests/               # 不访问真实数据库的 pytest 回归测试
 │   ├── test_launcher.py # 本地启动器 CLI
 │   ├── test_config.py   # 配置解析与数据源选择
