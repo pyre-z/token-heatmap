@@ -1,8 +1,13 @@
-# Token Heatmap — new-api 用量日历热力图 (SVG 直出)
-# 数据源: new-api PostgreSQL logs 表 type=2 成功请求按日聚合
+# Token Heatmap — 生产部署（独立镜像，不依赖宿主 bind mount）
 #
-# 多实例/多源并存：可配合 `docker compose -p <项目名>` 与 .env 中的 HOST_PORT、SOURCE 部署多个实例；
-# `name: token-heatmap` 仅为默认项目名，可用 `-p` 或 COMPOSE_PROJECT_NAME 覆盖。
+# 与 docker-compose.yml 的区别：
+# - 使用镜像内自带的 app/ 与 themes/（Dockerfile 已 COPY），无需挂载宿主源码
+# - 只读根文件系统 + /tmp tmpfs + 非 root 用户 + no-new-privileges
+# - THEMES_DIR 指向镜像内 /app/themes（修改主题需重新构建镜像或改为挂载）
+#
+# 用法：
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   多实例：docker compose -p token-heatmap-b -f docker-compose.prod.yml up -d（并在 .env 设置 HOST_PORT）
 name: token-heatmap
 
 services:
@@ -14,21 +19,20 @@ services:
     restart: unless-stopped
     init: true
     working_dir: /app
-    command: /opt/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
     ports:
       - "127.0.0.1:${HOST_PORT:-3004}:8000"
     env_file:
       - .env
-    volumes:
-      - ./app:/app
-      - ./themes:/themes
     environment:
-      - THEMES_DIR=/themes
+      - THEMES_DIR=/app/themes
+    read_only: true
+    tmpfs:
+      - /tmp
     security_opt:
       - no-new-privileges:true
     networks:
       - heatmap-net
-    # healthcheck: python:3.12-slim 无 curl，用 python urllib
+    # healthcheck: python:3.12-slim 无 curl，用 python urllib；readyz 反映数据源配置就绪
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/token/readyz', timeout=3).status==200 else 1)"]
       interval: 30s
