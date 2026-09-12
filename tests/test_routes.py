@@ -1,4 +1,6 @@
 
+import re
+
 from fastapi.testclient import TestClient
 
 from app import cache, main
@@ -75,6 +77,13 @@ def test_health_page_and_removed_paths():
     assert "/token/@?" in page.text
     for path in ("/token/year.svg", "/token/2026.svg", "/token/month.svg", "/healthz"):
         assert client.get(path).status_code == 404
+
+
+def test_config_page_grain_radios_bound_as_group():
+    """回归：querySelector 只返回单个元素，误接 .forEach 会抛 TypeError 中断脚本，预览因此不再渲染。"""
+    script = TestClient(main.app).get("/token/").text.split("<script>", 1)[1].split("</script>", 1)[0]
+    assert "querySelectorAll" in script, "grain radio 组必须整组绑定 change 事件"
+    assert re.search(r"(?:\bq|querySelector)\([^)]*\)\.forEach", script) is None, "单个元素没有 forEach"
 
 
 def test_readyz_ready_with_configured_source(monkeypatch):
