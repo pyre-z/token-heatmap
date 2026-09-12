@@ -32,6 +32,11 @@ class Source(ABC):
     #: 数据源标识，与配置 SOURCE 取值对应（如 new-api / sub2api）
     name: str = "base"
 
+
+    def is_configured(self) -> bool:
+        """返回数据源连接所需配置是否齐备（默认：无需额外配置）。"""
+        return True
+
     @abstractmethod
     def daily_tokens_in_range(self, start: dt.date, end: dt.date) -> dict[str, int]:
         """返回 [start, end) 每日 token 总量；key 为 YYYY-MM-DD 字符串。"""

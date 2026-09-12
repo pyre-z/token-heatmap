@@ -2,10 +2,9 @@ import datetime as dt
 
 from sqlalchemy.dialects import postgresql
 
-from app.sources.base import shanghai_date_range
 from app.config import TZ
-from app.sources import newapi
-from app.sources import sub2api_db
+from app.sources import newapi, sub2api_db
+from app.sources.base import shanghai_date_range
 
 
 def test_shanghai_date_range_uses_calendar_bounds():
@@ -47,7 +46,7 @@ def _compile_newapi_sql(monkeypatch, method, *args):
     monkeypatch.setattr(newapi, "_get_engine", lambda: "test-engine")
     monkeypatch.setattr(newapi, "Session", FakeSession)
     source = newapi.NewApiSource()
-    out = getattr(source, method)(*args)
+    getattr(source, method)(*args)
     return str(statements[0].compile(dialect=postgresql.dialect()))
 
 
@@ -102,7 +101,7 @@ def test_newapi_hourly_uses_epoch_window(monkeypatch):
 def test_sub2api_missing_env_returns_empty():
     import os
 
-    saved = {k: os.environ.pop(k, None) for k in sub2api_db._PG_ENV.values()}
+    saved = {k: os.environ.pop(k, None) for k in sub2api_db._PG_REQUIRED_ENV}
     try:
         source = sub2api_db.Sub2ApiSource()
         assert source.daily_tokens_in_range(dt.date(2026, 1, 1), dt.date(2027, 1, 1)) == {}

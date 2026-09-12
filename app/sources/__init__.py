@@ -23,6 +23,8 @@ _SOURCES: dict[str, Source] = {
 
 
 def get_source(name: str | None = None) -> Source:
-    """返回指定/默认数据源；未知名回退 new-api。"""
+    """Return the specified or default data source."""
     key = name or SOURCE
-    return _SOURCES.get(key, _SOURCES["new-api"])
+    if key not in _SOURCES:
+        raise ValueError(f"Unknown source: {key!r}. Supported: {list(_SOURCES.keys())}")
+    return _SOURCES[key]
