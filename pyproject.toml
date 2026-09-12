@@ -5,18 +5,29 @@ description = "FastAPI SVG token heatmap"
 license = "GPL-3.0"
 requires-python = ">=3.12"
 dependencies = [
+    "click",
     "fastapi",
     "psycopg2-binary",
     "sqlmodel",
+    "tzdata",
     "uvicorn[standard]",
     "watchdog>=6.0.0",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx",
+    "httpx2>=2.12.0",
     "pytest",
+    "ruff>=0.16.7",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 200
+
+[tool.ruff.lint]
+# 仅在项目级启用可稳定通过的规则集；格式/更激进规则不强制，避免改动无关代码。
+select = ["E9", "F", "W", "I", "RUF100"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
