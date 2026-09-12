@@ -47,7 +47,6 @@
 主题以 **JSON 文件**形式放在项目根 `themes/` 文件夹（文件名 = 主题族名，如 `themes/github.json`），每个文件包含 `day`（白天）与 `night`（夜晚）两套配色，由 `darkmode` 参数选择；`darkmode=auto` 时通过内嵌 CSS 变量（`:root` 默认 day，`@media (prefers-color-scheme: dark)` 覆盖为 night）让 SVG 跟随访问者系统深浅自动切换。
 
 ```json
-// themes/github.json
 {
   "day": {
     "colors": ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
@@ -66,21 +65,22 @@
 }
 ```
 
-**热更新（watchdog）**：服务启动后用 watchdog 监听 `themes/` 目录，新增 / 修改 / 删除任意 `*.json` 都会自动重载主题表，**无需重启容器**。容器内主题目录 = 宿主 `themes/`（bind mount，`THEMES_DIR=/themes` 可覆盖），宿主编辑 JSON 即可实时生效。
+**热更新（watchdog）**：服务启动后用 watchdog 监听 `themes/` 目录，新增 / 修改 / 删除任意 `*.json` 都会自动重载主题表，**无需重启容器**。主题表带单调递增的「主题版本」，重载会使旧 SVG 缓存立即失效；动态 SVG 响应改为 `Cache-Control: public, no-cache` + 内容 `ETag`（客户端可重新验证），因此宿主编辑 JSON 后立即生效，不再有长浏览器缓存。容器内主题目录 = 宿主 `themes/`（bind mount，`THEMES_DIR=/themes` 可覆盖；生产镜像默认 `/app/themes`）。
 
-新增主题只需在 `themes/` 放一个 `名字.json`（族名即文件名，配齐 `day`/`night` 两套配色，`colors` 必须 5 档十六进制色），`theme` 参数即族名。删除文件即移除该主题。
+新增主题只需在 `themes/` 放一个 `名字.json`（族名即文件名，配齐 `day`/`night` 两套配色，`colors` 必须 5 档、每个颜色严格为 6 位十六进制 `#[0-9A-Fa-f]{6}`），`theme` 参数即族名。删除文件即移除该主题。
 
 - 内置 `github` 兜底：`themes/` 目录不存在 / 为空 / 全部删除时仍可用 `theme=github`（内置配色与 `themes/github.json` 同构）；同名文件存在时以文件内容覆盖内置。
-- 非法 JSON / 结构不完整（缺 `day`/`night`、`colors` 不足 5 档等）自动跳过并告警，不影响其余主题。
+- 非法 JSON / 结构不完整（缺 `day`/`night`、`colors` 不足 5 档、颜色不是严格 6 位十六进制等）自动跳过并告警，不影响其余主题。
 - 旧版 `github-dark` 已随族收编移除，请改用 `theme=github&darkmode=1`。
 
 ## 端点
 
 | 端点 | 说明 |
 |---|---|
-| `GET /token/@?...` | 热力图 SVG（参数见上表），`image/svg+xml`，Cache-Control 600s，服务端另有 60s TTL 内存缓存（`CACHE_TTL_SECONDS` 可配） |
+| `GET /token/@?...` | 热力图 SVG（参数见上表），`image/svg+xml`，`Cache-Control: public, no-cache` + 内容 `ETag`（可重新验证）；服务端另有 60s TTL 内存缓存（`CACHE_TTL_SECONDS` 可配） |
 | `GET /token/` | 参数可视化配置页 |
-| `GET /token/healthz` | 健康检查 `{"status":"ok"}` |
+| `GET /token/healthz` | 存活检查（liveness）：仅表示进程可响应，不查数据库，固定返回 `{"status":"ok"}` |
+| `GET /token/readyz` | 就绪检查（readiness）：配置有效且所选 `SOURCE` 数据源已配置；否则返回 503（不泄露连接信息） |
 
 ## 多数据源（Source 架构）
 
@@ -97,9 +97,9 @@
 | `sub2api` | `usage_logs` 表 `input + output + cache_creation + cache_read tokens`（无状态过滤） | `SUB2API_PGHOST/SUB2API_PGPORT/SUB2API_PGDATABASE/SUB2API_PGUSER/SUB2API_PGPASSWORD` |
 
 - 统计均按 **Asia/Shanghai 时区**聚合（年图按自然日，日图按小时）
-- 不含计费额度（quota）、不含失败请求
+- 不含计费额度（quota）；`new-api` 只统计成功请求（`type=2`），`sub2api` 无状态过滤，包含所有上报 token 的调用（含部分失败）
 - 色阶: 5 级绿（GitHub 绿），按 **分位数分桶**（rank-based；相同 token 值保持同档）
-- 多源并存时部署多实例，各实例 `.env` 指定 `SOURCE`（+ 各自独立连接变量）
+- 多源并存时部署多实例，各实例 `.env` 指定 `SOURCE`（+ 各自独立连接变量）；`SUB2API_PGPORT` 可选（默认 5432），host/database/user/password 必填
 
 ## 部署
 
@@ -107,14 +107,38 @@
 # 1. 复制模板并填写真实数据源连接凭据
 cp .env.template .env
 
-# 2. 构建并启动（镜像内依赖已预装，运行时不会安装依赖）
+# 2. 开发/常规部署（bind mount 源码与主题，改代码后 restart）
 docker compose up -d --build
+
+# 3. 生产部署（镜像内置 app/ 与 themes/，只读根文件系统 + 非 root）
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-- 容器: `token-heatmap`（FastAPI + uvicorn，依赖预装在镜像 `/opt/venv`），端口映射按 `docker-compose.yml` 配置（默认 `127.0.0.1:3004:8000`）
-- ⚠️ compose 有 `name: token-heatmap` 固定项目名——**不要删**，否则 `docker compose down` 会因目录名撞车误伤其他 compose 项目
-- 容器挂载的外部网络由 `.env` 的 `NETWORK_NAME` 指定（默认 `proxy-network`；1Panel 等环境设为对应外部网络名）。部署前确认该外部网络已存在：`docker network create proxy-network`（或按环境改 `.env` 后重建）
-- 服务端 SVG 缓存 TTL 由 `.env` 的 `CACHE_TTL_SECONDS` 控制（默认 60 秒）
+- 镜像 `token-heatmap:uv`（FastAPI + uvicorn，依赖预装在 `/opt/venv`）。`Dockerfile` 已 `COPY app/` 与 `themes/`，镜像可独立运行。
+- `docker-compose.yml`（开发/常规部署）：挂载 `./app:/app`、`./themes:/themes`，`THEMES_DIR=/themes`，命令 `uvicorn main:app`；宿主端口由 `HOST_PORT` 控制（默认 `3004`）。
+- `docker-compose.prod.yml`（生产）：不挂载宿主源码，`THEMES_DIR=/app/themes`，`read_only: true` + `/tmp` tmpfs，非 root，`no-new-privileges`。
+- ⚠️ compose 默认项目名为 `token-heatmap`——**不要删**；多实例可用 `docker compose -p <项目名>`（或 `COMPOSE_PROJECT_NAME`）覆盖，并为每个实例设置不同的 `HOST_PORT`（与 `.env` 中的 `SOURCE`）。
+- 外部网络由 `.env` 的 `NETWORK_NAME` 指定（默认 `proxy-network`）。部署前确认已存在：`docker network create proxy-network`（或按环境改 `.env` 后重建）。
+- 两个 compose 的 healthcheck 均探测 `/token/readyz`：配置或数据源不可用会标记为 unhealthy。
+- 数据库账号建议最小权限只读：`CONNECT` + schema `USAGE` + 目标表 `SELECT`；服务只执行 SELECT。
+- TLS：本地/Unix socket 无需配置；生产建议 `PGSSLMODE=verify-full`（或 `SUB2API_PGSSLMODE`）并挂载 CA（`PGSSLROOTCERT`），未知取值启动即报错。
+
+### 环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SOURCE` | `new-api` | 数据源：`new-api` / `sub2api`；未识别值启动失败 |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` | — | new-api 连接（`PGPORT` 默认 5432，其余必填） |
+| `SUB2API_PGHOST` / `SUB2API_PGPORT` / `SUB2API_PGDATABASE` / `SUB2API_PGUSER` / `SUB2API_PGPASSWORD` | — | sub2api 连接（`SUB2API_PGPORT` 可选，默认 5432） |
+| `DB_STATEMENT_TIMEOUT_MS` | `5000` | 单条查询最大执行毫秒数，超时由 PostgreSQL 取消 |
+| `PGSSLMODE` / `PGSSLROOTCERT` | 未设置 | new-api 可选 TLS（生产建议 `verify-full` + CA） |
+| `SUB2API_PGSSLMODE` / `SUB2API_PGSSLROOTCERT` | 未设置 | sub2api 可选 TLS |
+| `CACHE_TTL_SECONDS` | `60` | 服务端 SVG 缓存 TTL（正数） |
+| `CACHE_MAX_ENTRIES` | `2000` | 缓存最大条目数（正整数） |
+| `MAX_RENDER_CONCURRENCY` | `4` | 每进程同时渲染/查询上限（保护数据库） |
+| `NETWORK_NAME` | `proxy-network` | compose 外部网络名 |
+| `HOST_PORT` | `3004` | compose 宿主监听端口 |
+| `THEMES_DIR` | 项目根 `themes/` | 主题目录；容器内由 compose 覆盖（`/themes` 或 `/app/themes`） |
 
 ## 布局
 
@@ -129,40 +153,58 @@ docker compose up -d --build
 
 ```
 token-heatmap/
+├── main.py              # 本地启动器（Click：--reload / --port）
 ├── app/
-│   ├── main.py          # FastAPI 路由和装配（参数校验、TTL 缓存、配置页、启动 watchdog）
-│   ├── cache.py         # 线程安全 TTL 缓存
-│   ├── config.py        # 时区、布局常量
-│   ├── heatmap.py       # 分桶、主题渲染（从 theme_loader 取主题）
-│   ├── theme_loader.py  # 主题加载器：themes/*.json + watchdog 热更新 + 内置 github 兜底
+│   ├── main.py          # FastAPI 路由和装配（参数校验、TTL 缓存、配置页、lifespan）
+│   ├── cache.py         # 线程安全 TTL 缓存 + 同 key single-flight / 并发上限
+│   ├── config.py        # 时区、布局常量、环境变量解析与校验
+│   ├── heatmap.py       # 分档与年/滚动年/月/日 SVG 渲染编排
+│   ├── heatmap_stats.py # 统计单位格式化 + 今日/本月/今年累计
+│   ├── heatmap_svg.py   # SVG 文档组装、图例与星期标签
+│   ├── theme_loader.py  # 主题加载器：themes/*.json + watchdog 热更新 + 版本号 + 内置 github 兜底
 │   └── sources/         # 多数据源（Source 抽象 + 各网关实现）
 │       ├── base.py      # Source ABC + 时区日期区间 helper
+│       ├── pg.py        # 共享 PostgreSQL connect_args（statement_timeout / TLS）
 │       ├── newapi.py    # new-api logs 表实现
 │       └── sub2api_db.py# sub2api usage_logs 表实现
 ├── themes/              # 主题 JSON 文件（文件名 = 主题族名，watchdog 热更新）
 │   └── github.json
 ├── tests/               # 不访问真实数据库的 pytest 回归测试
-├── pyproject.toml       # uv 项目与依赖定义（含 watchdog）
+│   ├── test_launcher.py # 本地启动器 CLI
+│   ├── test_config.py   # 配置解析与数据源选择
+│   └── test_pg_engine.py# 引擎 connect_args（超时/TLS）
+├── pyproject.toml       # uv 项目与依赖定义（dev: pytest/httpx2/ruff；Ruff 配置）
 ├── uv.lock              # 锁定依赖
 ├── .env.template        # 连接凭据模板（复制为 .env 后填写）
+├── .github/workflows/ci.yml  # CI：Ruff + pytest + 锁文件 + Compose 校验
 ├── LICENSE              # GPL-3.0
-├── Dockerfile
-└── docker-compose.yml
+├── Dockerfile           # 构建独立镜像（COPY app/ 与 themes/，非 root）
+├── docker-compose.yml   # 开发/常规部署（bind mount 源码与主题）
+└── docker-compose.prod.yml  # 生产部署（只读根文件系统，不挂载源码）
 ```
 
 ## 开发与测试（uv）
 
 ```bash
-# 首次或依赖变更后创建/同步 .venv（开发依赖包含 pytest、httpx）
+# 首次或依赖变更后创建/同步 .venv（开发依赖包含 pytest、httpx2、ruff）
 uv sync
 uv run pytest -q
+uv run ruff check .
 
 # 修改依赖后更新锁文件
 uv lock
 ```
 
-- 改 `app/` 代码后容器需重启加载（uvicorn 无 auto-reload）：`docker compose restart token-heatmap`
-- `./app:/app` 保持挂载；依赖在镜像 `/opt/venv`，restart 不会再联网安装依赖
+本地启动（无需 Docker；会加载项目根 `.env`，默认仅监听 `127.0.0.1:8000`）：
+
+```bash
+uv run main.py                  # 本地启动，默认 127.0.0.1:8000
+uv run main.py --reload         # 代码变更自动重载
+uv run main.py --port 9000      # 自定义端口（1-65535）
+```
+
+- 修改 `app/` 代码后：本地用 `--reload`；容器需 `docker compose restart token-heatmap`。`./app:/app` 保持挂载，依赖在镜像 `/opt/venv`，restart 不会重新联网安装依赖。
+- CI（`.github/workflows/ci.yml`）执行 `uv sync --locked`、`ruff check`、`pytest`、`uv lock --check` 与 Compose 配置校验。
 
 ## License
 
